@@ -1,0 +1,9 @@
+# Generated plots and documents
+*.png
+*.pdf
+figs/
+
+# Python/Jupyter transient files
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
