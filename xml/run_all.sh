@@ -2,7 +2,7 @@
 set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-output_root="${OUTPUT_ROOT:-/nevis/riverside/data/epelaez/ma_zexp/1mu1p_sel}"
+output_root="${OUTPUT_ROOT:-/nevis/hopper/data/epelaez/axial_mass}"
 profit_bin="${PROFIT_BIN:-/nevis/riverside/share/epelaez/PROfit/build/bin/PROfit}"
 nthreads="${NTHREADS:-8}"
 stages="${STAGES:-plot profile}"
