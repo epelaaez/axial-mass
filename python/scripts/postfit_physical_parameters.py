@@ -34,10 +34,12 @@ from zexp_reweighting import (  # noqa: E402
     ZEXP_FA_Q2_ZERO,
     ZEXP_T0_GEV2,
     ZEXP_T_CUT_GEV2,
+    LQCD_K7_PRIOR,
     LQCD_K6_PRIOR,
     MINERVA_K6_PRIOR,
     MINERVA_K7_PRIOR,
     MINERVA_LEGACY_PRIOR,
+    MINERVA_LQCD_K7_PRIOR,
     MINERVA_LQCD_K6_PRIOR,
     complete_zexp_a_values,
 )
@@ -45,6 +47,11 @@ from zexp_reweighting import (  # noqa: E402
 
 DATA_ROOT = Path("/nevis/riverside/data/epelaez/ma_zexp/1mu1p_sel")
 FIGURE_ROOT = Path(__file__).resolve().parents[2] / "figs"
+# Fit outputs live at DATA_ROOT/<data dir>/<fit>/. Notebooks and figure paths
+# keep the run_all.sh suite names (nuwro_fit_results, asimov_fit_results,
+# opendata_fit_results); SUITE_DATA_DIRS maps them to the on-disk directory.
+# While the new *_fit_results production is being debugged, read the earlier
+# zexp_prior_fits* outputs instead.
 SUITE_DATA_DIRS = {
     "nuwro_fit_results": "zexp_prior_fits",
     "asimov_fit_results": "zexp_prior_fits_asimov",
@@ -82,8 +89,11 @@ FA_SOURCE_COLORS = {
     "minerva_k7": "#D55E00",
     "minerva_k6": "#56B4E9",
     "minerva_k6_uniform": "#1607E4",
+    "minerva_k6_uniform_nuisance": "#5B4FE8",
     "lqcd_k6": "#009E73",
+    "lqcd_k7": "#007A5A",
     "minerva_lqcd_k6": "#CC79A7",
+    "minerva_lqcd_k7": "#A85F8C",
     "ma": "#0072B2",
     "ma_no_axff": "#0072B2",
 }
@@ -94,13 +104,11 @@ REFERENCE_PRIORS = {
     "minerva_lqcd_k6": MINERVA_LQCD_K6_PRIOR,
 }
 
-REFERENCE_LABELS = {
-    "deuterium": "Deuterium (2016) $k_{\max}=8$ prior",
-    "deuterium_k6": r"Deuterium (2025) $k_{\max}=6$ prior",
-    "minerva_k6": "MINERvA $k_{\max}=6$ prior",
-    "lqcd_k6": "LQCD $k_{\max}=6$ prior",
-    "minerva_lqcd_k6": "MINERvA + LQCD $k_{\max}=6$ prior",
-    "minerva_k6_uniform": r"MicroBooNE $k_{\max}=6$ uniform prior"
+# Standalone reference priors that have no fit of their own. The shared keys
+# minerva_k6, lqcd_k6, and minerva_lqcd_k6 take their legend text from SPECS.
+REFERENCE_SOURCES = {
+    "deuterium": ("Deuterium (2016)", 8),
+    "deuterium_k6": ("Deuterium (2025)", 6),
 }
 
 # Native kmax=8 Deuterium result from Eqs. (31)--(33) of Meyer et al. (2016),
@@ -140,46 +148,123 @@ class FitSpec:
     nuisance_labels: tuple = ()
     nuisance_branches: tuple = ()
     uniform_prior: bool = False
+    # Legend text: ``source`` names the prior ("MINERvA (2026)", "uniform",
+    # "Gaussian $M_A$"); ``variant`` distinguishes fits that share one prior.
+    source: str = ""
+    variant: str = ""
 
 
 SPECS = (
-    FitSpec("ma", r"Dipole $M_A$",
+    FitSpec("ma", r"Dipole $M_A$", source=r"Gaussian $M_A$",
             profile_labels=("MACCQE", "AxFFCCQEshape", "NormCCMEC", "RPA_CCQE"),
             chain_branches=("MaCCQE_UBGenie", "AxFFCCQEshape_UBGenie",
                             "NormCCMEC_UBGenie", "RPA_CCQE_UBGenie")),
     FitSpec("ma_no_axff", r"Dipole $M_A$ without AxFFCCQEshape",
+            source=r"Gaussian $M_A$", variant="without AxFFCCQEshape",
             profile_labels=("MACCQE", "NormCCMEC", "RPA_CCQE"),
             chain_branches=("MaCCQE_UBGenie", "NormCCMEC_UBGenie",
                             "RPA_CCQE_UBGenie")),
     FitSpec("ma_uniform", r"Dipole $M_A$ without an $M_A$ pull penalty",
+            source=r"uniform $M_A$",
             profile_labels=("MACCQE", "NormCCMEC", "RPA_CCQE"),
             chain_branches=("MaCCQE_UBGenie", "NormCCMEC_UBGenie",
                             "RPA_CCQE_UBGenie"),
             uniform_prior=True),
-    FitSpec("lqcd_k6", r"LQCD (2026), $k_{\max}=6$", LQCD_K6_PRIOR),
-    FitSpec("minerva_k6", r"MINERvA (2026), $k_{\max}=6$", MINERVA_K6_PRIOR),
+    FitSpec("lqcd_k6", r"LQCD (2026), $k_{\max}=6$", LQCD_K6_PRIOR,
+            source="LQCD (2026)"),
+    FitSpec("lqcd_k7", r"LQCD (2026), $k_{\max}=7$", LQCD_K7_PRIOR,
+            source="LQCD (2026)"),
+    FitSpec("minerva_k6", r"MINERvA (2026), $k_{\max}=6$", MINERVA_K6_PRIOR,
+            source="MINERvA (2026)"),
     FitSpec(
         "minerva_k6_nuisance",
         r"MINERvA (2026), $k_{\max}=6$, fitted nuisances",
         MINERVA_K6_PRIOR,
+        source="MINERvA (2026)", variant="fitted nuisances",
         nuisance_labels=("NormCCMEC", "RPA_CCQE"),
         nuisance_branches=("NormCCMEC_UBGenie", "RPA_CCQE_UBGenie"),
     ),
     FitSpec("minerva_k6_uniform",
             r"$k_{\max}=6$ uniform prior",
-            MINERVA_K6_PRIOR, uniform_prior=True),
-    FitSpec("minerva_k7", r"MINERvA (2026), $k_{\max}=7$", MINERVA_K7_PRIOR),
-    FitSpec("minerva_k8", r"MINERvA (2023), $k_{\max}=8$", MINERVA_LEGACY_PRIOR),
+            MINERVA_K6_PRIOR, uniform_prior=True, source="uniform"),
+    FitSpec(
+        "minerva_k6_uniform_nuisance",
+        r"$k_{\max}=6$ uniform prior, fitted nuisances",
+        MINERVA_K6_PRIOR, uniform_prior=True,
+        source="uniform", variant="fitted nuisances",
+        nuisance_labels=("NormCCMEC", "RPA_CCQE"),
+        nuisance_branches=("NormCCMEC_UBGenie", "RPA_CCQE_UBGenie"),
+    ),
+    FitSpec("minerva_k7", r"MINERvA (2026), $k_{\max}=7$", MINERVA_K7_PRIOR,
+            source="MINERvA (2026)"),
+    FitSpec("minerva_k8", r"MINERvA (2023), $k_{\max}=8$", MINERVA_LEGACY_PRIOR,
+            source="MINERvA (2023)"),
     FitSpec("minerva_lqcd_k6", r"MINERvA + LQCD (2026), $k_{\max}=6$",
-            MINERVA_LQCD_K6_PRIOR),
+            MINERVA_LQCD_K6_PRIOR, source="MINERvA + LQCD (2026)"),
+    FitSpec("minerva_lqcd_k7", r"MINERvA + LQCD (2026), $k_{\max}=7$",
+            MINERVA_LQCD_K7_PRIOR, source="MINERvA + LQCD (2026)"),
     FitSpec(
         "minerva_lqcd_k6_nuisance",
         r"MINERvA + LQCD (2026), $k_{\max}=6$, fitted nuisances",
         MINERVA_LQCD_K6_PRIOR,
+        source="MINERvA + LQCD (2026)", variant="fitted nuisances",
         nuisance_labels=("NormCCMEC", "RPA_CCQE"),
         nuisance_branches=("NormCCMEC_UBGenie", "RPA_CCQE_UBGenie"),
     ),
 )
+
+def format_prior_label(source, kmax=None):
+    """Standard legend text for a prior: ``"<Source> prior, $k_max=N$"``.
+
+    The k_max part is omitted when it does not apply (dipole M_A priors).
+    """
+    label = f"{source[:1].upper()}{source[1:]} prior"
+    if kmax is not None:
+        label += rf", $k_{{\max}}={kmax}$"
+    return label
+
+
+def format_posterior_label(source=None, kmax=None, variant=""):
+    """Standard legend text for a posterior.
+
+    ``"Posterior, $k_max=N$"`` when the figure involves a single prior; pass
+    ``source`` to obtain ``"Posterior from <source> prior, $k_max=N$"`` when
+    several priors appear in one figure. ``variant`` (for example ``"fitted
+    nuisances"``) is appended after a comma.
+    """
+    label = "Posterior" if source is None else f"Posterior from {source} prior"
+    if kmax is not None:
+        label += rf", $k_{{\max}}={kmax}$"
+    if variant:
+        label += f", {variant}"
+    return label
+
+
+def _spec_kmax(spec):
+    return None if spec.prior is None else spec.prior.kmax
+
+
+def prior_label(spec):
+    """Legend text for the prior of a fit in ``SPECS``."""
+    return format_prior_label(spec.source, _spec_kmax(spec))
+
+
+def posterior_label(spec, single_prior=True):
+    """Legend text for the posterior of a fit in ``SPECS``.
+
+    With ``single_prior=False`` the prior the posterior was obtained from is
+    named, which is needed whenever a figure shows more than one prior.
+    """
+    return format_posterior_label(
+        None if single_prior else spec.source, _spec_kmax(spec), spec.variant
+    )
+
+
+REFERENCE_LABELS = {
+    **{key: format_prior_label(source, kmax)
+       for key, (source, kmax) in REFERENCE_SOURCES.items()},
+    **{spec.key: prior_label(spec) for spec in SPECS if spec.key in REFERENCE_PRIORS},
+}
 
 
 def _root_file(suite, key):
@@ -549,7 +634,7 @@ def _fa_observables(coefficient_samples, t0_gev2, t_cut_gev2, q2_points):
 @mpl.rc_context(PUBLICATION_RC)
 def plot_distribution_overlay(results, selections, bins=55,
                               n_reference_samples=50_000, seed=2026,
-                              figsize=(7.0, 6.2)):
+                              figsize=(7.0, 6.2), labels=None):
     """Overlay chosen priors/posteriors as contours in a common (a1, a2) basis.
 
     Each selection is ``(key, distribution)`` where distribution is ``"prior"``
@@ -558,24 +643,33 @@ def plot_distribution_overlay(results, selections, bins=55,
     ``minerva_lqcd_k6``. Posteriors are read from ``results``. Every selected
     distribution must use the same t0 and t_cut convention; incompatible bases
     are rejected rather than silently overlaying unlike coefficients.
+
+    Legend text follows :func:`prior_label` and :func:`posterior_label`:
+    ``"<Source> prior, $k_max=N$"`` for priors, whether or not the fit was
+    loaded into ``results``, and ``"Posterior, $k_max=N$"`` for posteriors,
+    extended to ``"Posterior from <source> prior, ..."`` when the figure
+    involves more than one prior. ``labels`` optionally overrides individual
+    entries: key posteriors by fit key and priors by ``"<key> prior"``.
     """
     if not selections:
         raise ValueError("Select at least one prior or posterior distribution")
+    labels = dict(labels or {})
+    fit_specs = {spec.key: spec for spec in SPECS if spec.prior is not None}
     distributions = []
     common_basis = None
     for index, (key, distribution) in enumerate(selections):
+        spec = fit_specs.get(key)
         if distribution == "prior":
             if key in results and results[key]["spec"].prior is not None:
                 result = results[key]
                 coefficients = result["prior_samples"]
                 prior = result["spec"].prior
                 t0, t_cut = prior.t0_gev2, prior.t_cut_gev2
-                label = f'{result["spec"].title} prior'
             else:
                 coefficients, t0, t_cut = _reference_prior_samples(
                     key, n_reference_samples, seed + index
                 )
-                label = REFERENCE_LABELS[key]
+            prior_text = REFERENCE_LABELS[key] if spec is None else prior_label(spec)
         elif distribution == "posterior":
             if key not in results:
                 raise KeyError(
@@ -587,10 +681,11 @@ def plot_distribution_overlay(results, selections, bins=55,
                 raise ValueError(
                     f"{key!r} is a dipole-M_A fit, not a z-expansion distribution"
                 )
+            spec = result["spec"]
             coefficients = result["samples"]
-            prior = result["spec"].prior
+            prior = spec.prior
             t0, t_cut = prior.t0_gev2, prior.t_cut_gev2
-            label = f'{result["spec"].title} posterior'
+            prior_text = prior_label(spec)
         else:
             raise ValueError(
                 f"Distribution for {key!r} must be 'prior' or 'posterior', "
@@ -611,7 +706,16 @@ def plot_distribution_overlay(results, selections, bins=55,
         if not np.all(np.isfinite(values)):
             raise ValueError(f"{key!r} contains non-finite a1/a2 samples")
         color = FA_SOURCE_COLORS.get(key, f"C{index % 10}")
-        distributions.append((label, values, color, distribution))
+        distributions.append((key, distribution, spec, prior_text, values, color))
+
+    # With a single prior in the figure, posteriors need not name it.
+    single_prior = len({item[3] for item in distributions}) == 1
+    distributions = [
+        (labels.get(f"{key} prior", prior_text) if distribution == "prior"
+         else labels.get(key, posterior_label(spec, single_prior)),
+         values, color, distribution)
+        for key, distribution, spec, prior_text, values, color in distributions
+    ]
 
     joined = np.concatenate([values for _, values, _, _ in distributions])
     xlow, ylow = np.quantile(joined, 0.001, axis=0)
@@ -659,7 +763,12 @@ def plot_distribution_overlay(results, selections, bins=55,
 def plot_ma_posterior_overlay(results,
                               fit_keys=("ma_no_axff", "ma_uniform"),
                               labels=None, bins=45, figsize=(7.2, 7.2)):
-    """Compare M_A, NormCCMEC, and RPA posteriors from compatible fits."""
+    """Compare M_A, NormCCMEC, and RPA posteriors from compatible fits.
+
+    Legend entries follow :func:`posterior_label` and name the prior whenever
+    the selected fits use different priors; ``labels`` maps fit keys to
+    replacement text.
+    """
     colors = ("#0072B2", "#D55E00", "#009E73", "#CC79A7")
     overlays = []
     expected_names = None
@@ -683,8 +792,15 @@ def plot_ma_posterior_overlay(results,
             expected_names = names
         elif names != expected_names:
             raise ValueError("Selected M_A posteriors use different parameters")
-        label = labels.get(key, result["spec"].title) if labels else result["spec"].title
-        overlays.append((label, samples, colors[index % len(colors)]))
+        overlays.append((key, result["spec"], samples, colors[index % len(colors)]))
+
+    # Standard legend text; ``labels`` (keyed by fit key) overrides entries.
+    labels = dict(labels or {})
+    single_prior = len({prior_label(spec) for _, spec, _, _ in overlays}) == 1
+    overlays = [
+        (labels.get(key, posterior_label(spec, single_prior)), samples, color)
+        for key, spec, samples, color in overlays
+    ]
 
     n = len(expected_names)
     joined = np.concatenate([samples for _, samples, _ in overlays], axis=0)
@@ -756,8 +872,16 @@ def plot_ma_posterior_overlay(results,
 
 @mpl.rc_context(PUBLICATION_FONT_RC)
 def plot_corner(result, bins=35, show_all_coefficients=False,
-                show_prior=False, prior_mask=None, axis_names=None):
-    """Joint physical posterior, restricted to independent coefficients by default."""
+                show_prior=False, prior_mask=None, axis_names=None,
+                axis_ranges=None):
+    """Joint physical posterior, restricted to independent coefficients by default.
+
+    ``axis_ranges`` optionally maps a parameter name (as in ``result["names"]``,
+    e.g. ``"M_A [GeV]"`` or ``"a1"``) to a fixed ``(low, high)`` display range,
+    so panels for that parameter share one x/y range across fits and suites.
+    Parameters absent from the mapping keep their automatic, sample-derived
+    range. Pass ``None`` (the default) to fix no parameter's range.
+    """
     # Nested blue regions follow the visual convention of the reference
     # corner plot: darker for 68%, lighter for 95%, without outline contours.
     posterior_color = "#0072C1"
@@ -789,6 +913,9 @@ def plot_corner(result, bins=35, show_all_coefficients=False,
                              squeeze=False)
     ranges = []
     for i in range(n):
+        if axis_ranges is not None and names[i] in axis_ranges:
+            ranges.append(tuple(axis_ranges[names[i]]))
+            continue
         range_samples = (np.r_[samples[:, i], prior_samples[:, i]]
                          if prior_mask[i] else samples[:, i])
         low, high = range_samples.min(), range_samples.max()
@@ -886,8 +1013,8 @@ def plot_corner(result, bins=35, show_all_coefficients=False,
             ax.tick_params(labelsize=7)
 
     legend_handles = [
-        Patch(facecolor=contour68_fill, label="68% region"),
-        Patch(facecolor=contour95_fill, label="95% region"),
+        Patch(facecolor=contour68_fill, label="Posterior 68%"),
+        Patch(facecolor=contour95_fill, label="Posterior 95%"),
         Line2D([], [], color=best_fit_color, marker="D", ls="none", markersize=6,
                label="Profile best fit"),
     ]
@@ -924,7 +1051,7 @@ def plot_corner(result, bins=35, show_all_coefficients=False,
 
 @mpl.rc_context(PUBLICATION_FONT_RC)
 def plot_ma_nuisance_corner(result, bins=35, show_prior=False,
-                            show_ma_prior=True):
+                            show_ma_prior=True, axis_ranges=None):
     """Joint posterior of physical M_A and its fitted cross-section nuisances."""
     joint = dict(result)
     n = len(result["ma_joint_names"])
@@ -940,10 +1067,11 @@ def plot_ma_nuisance_corner(result, bins=35, show_prior=False,
     return plot_corner(
         joint, bins=bins, show_prior=show_prior,
         prior_mask=[show_ma_prior] + [True] * (n - 1),
+        axis_ranges=axis_ranges,
     )
 
 
-def plot_zexp_nuisance_corner(result, bins=35, show_prior=False):
+def plot_zexp_nuisance_corner(result, bins=35, show_prior=False, axis_ranges=None):
     """Joint posterior of physical z coefficients and fitted nuisances."""
     joint = dict(result)
     n = len(result["zexp_nuisance_names"])
@@ -964,11 +1092,18 @@ def plot_zexp_nuisance_corner(result, bins=35, show_prior=False):
     ]
     return plot_corner(
         joint, bins=bins, show_prior=show_prior, axis_names=axis_names,
+        axis_ranges=axis_ranges,
     )
 
 
-def plot_fit(result, bins=45):
-    """One compact figure: marginal distributions above, intervals below."""
+def plot_fit(result, bins=45, axis_ranges=None):
+    """One compact figure: marginal distributions above, intervals below.
+
+    ``axis_ranges`` optionally maps a parameter name (as in ``result["names"]``)
+    to a fixed ``(low, high)`` x-axis range, so the same parameter shares one
+    range across fits and suites. Parameters absent from the mapping keep
+    their automatic range. Pass ``None`` (the default) to fix no range.
+    """
     n = len(result["names"])
     fig, axes = plt.subplots(2, n, figsize=(max(6, 2.05 * n), 5.1),
                              squeeze=False, height_ratios=(2.2, 1),
@@ -987,13 +1122,15 @@ def plot_fit(result, bins=45):
                     label="68% interval")
         top.set_title(_parameter_label(name))
         top.set_yticks([])
+        if axis_ranges is not None and name in axis_ranges:
+            top.set_xlim(axis_ranges[name])
 
         bottom.errorbar(result["central"][i], 1, xerr=result["sigma"][i],
                         fmt="o", color="C3", capsize=2)
         lo, hi = result["q16"][i], result["q84"][i]
         bottom.hlines(0, lo, hi, color="C0", linewidth=2)
         bottom.plot(result["profile"][i], 0, "D", color="C0", markersize=5)
-        bottom.set_yticks([0, 1], ["Post", "Prior"] if i == 0 else ["", ""])
+        bottom.set_yticks([0, 1], ["Posterior", "Prior"] if i == 0 else ["", ""])
         bottom.grid(axis="x", alpha=.25)
         bottom.set_ylim(-.6, 1.6)
 
@@ -1058,7 +1195,7 @@ def _fa_curves(result, q2, use_prior=False, max_samples=20_000, seed=2026):
 @mpl.rc_context(PUBLICATION_RC)
 def plot_fa_summary(results, show=None, comparison_prior=None,
                     q2_range=(0.0, 2.0), n_q2=401, max_samples=20_000,
-                    ratio_zoom=None, xscale="linear"):
+                    ratio_zoom=None, xscale="linear", labels=None):
     """Publication figure of selected posteriors and one comparison prior.
 
     Parameters
@@ -1066,7 +1203,7 @@ def plot_fa_summary(results, show=None, comparison_prior=None,
     results : mapping
         Output of :func:`run_suite`.
     show : iterable of str, optional
-        Fit keys whose post-fit F_A distributions are drawn.  ``None`` draws
+        Fit keys whose posterior F_A distributions are drawn.  ``None`` draws
         every available fit; an empty iterable draws none.
     comparison_prior : str, optional
         Fit key whose *prior* is drawn and used as the ratio denominator.
@@ -1076,18 +1213,28 @@ def plot_fa_summary(results, show=None, comparison_prior=None,
         Use ``None`` to retain the simpler two-panel figure.
     xscale : {"linear", "log"}
         Scale shared by every Q^2 axis. Log scale requires positive limits.
+    labels : mapping, optional
+        Legend overrides: posteriors keyed by fit key, the comparison prior by
+        ``"<key> prior"``. Unlisted entries use :func:`prior_label` and
+        :func:`posterior_label`; posteriors name their prior only when the
+        figure involves more than one prior.
     """
     available = tuple(results)
     selected = available if show is None else tuple(show)
     unknown = set(selected) - set(available)
     if unknown:
-        raise KeyError(f"Unknown post-fit key(s): {sorted(unknown)}; available: {available}")
+        raise KeyError(f"Unknown posterior key(s): {sorted(unknown)}; available: {available}")
     if comparison_prior is not None and comparison_prior not in results:
         raise KeyError(
             f"Unknown comparison prior {comparison_prior!r}; available: {available}"
         )
     if not selected and comparison_prior is None:
         raise ValueError("Select at least one posterior or a comparison prior")
+    labels = dict(labels or {})
+    prior_texts = {prior_label(results[key]["spec"]) for key in selected}
+    if comparison_prior is not None:
+        prior_texts.add(prior_label(results[comparison_prior]["spec"]))
+    single_prior = len(prior_texts) <= 1
 
     if xscale not in {"linear", "log"}:
         raise ValueError("xscale must be 'linear' or 'log'")
@@ -1133,7 +1280,10 @@ def plot_fa_summary(results, show=None, comparison_prior=None,
         zoom_axis = fig.add_subplot(grid[1, 2])
 
     if prior_quantiles is not None:
-        label = f'{results[comparison_prior]["spec"].title} prior'
+        label = labels.get(
+            f"{comparison_prior} prior",
+            prior_label(results[comparison_prior]["spec"]),
+        )
         # Keep the common pre-fit reference neutral. Supplying alpha through
         # the face RGBA (rather than Collection.alpha) leaves hatch strokes
         # opaque and therefore visible in vector PDF output.
@@ -1178,7 +1328,9 @@ def plot_fa_summary(results, show=None, comparison_prior=None,
             Patch(facecolor=to_rgba(color, .25), edgecolor="none"),
             Line2D([], [], color=color, ls=linestyle, lw=2),
         ))
-        legend_labels.append(result["spec"].title)
+        legend_labels.append(
+            labels.get(key, posterior_label(result["spec"], single_prior))
+        )
         ratio.fill_between(q2, low / denominator, high / denominator,
                            color=color, alpha=.25, linewidth=0)
         ratio.plot(q2, median / denominator, color=color, ls=linestyle, lw=2)
@@ -1191,7 +1343,7 @@ def plot_fa_summary(results, show=None, comparison_prior=None,
     ratio.axhline(1, color="0.35", lw=1, ls=(0, (2, 2)), zorder=-1)
     ax.set_ylabel(r"$-F_A(Q^2)$")
     ax.set_xlabel(r"$Q^2$ [GeV$^2$]")
-    ratio.set_ylabel("Post / Pre")
+    ratio.set_ylabel("Posterior / prior")
     ratio.set_xlabel(r"$Q^2$ [GeV$^2$]")
     ratio.set_xlim(q2_range)
     ratio.set_xscale(xscale)
@@ -1253,8 +1405,18 @@ def plot_fa_summary(results, show=None, comparison_prior=None,
 def run_suite(suite, burn_in=0, thin=1, n_prior=50_000,
               show_all_coefficients=False, show_prior_in_corner=False,
               save_figures=True, output_dir=FIGURE_ROOT, save_dpi=600,
-              save_formats=("png", "pdf")):
-    """Load, summarize, plot, and optionally save every measurement in a suite."""
+              save_formats=("pdf",), axis_ranges=None):
+    """Load, summarize, plot, and optionally save every measurement in a suite.
+
+    ``axis_ranges`` optionally maps a parameter name (e.g. ``"M_A [GeV]"`` or
+    ``"a1"``) to a fixed ``(low, high)`` display range, applied to every
+    marginal and corner panel for that parameter across every fit in the
+    suite. This is how parameters that appear in multiple fits (an M_A fit
+    across suites, a shared z-expansion coefficient across priors) end up
+    with directly comparable axes. Parameters absent from the mapping keep
+    their automatic, per-fit range; pass ``None`` (the default) to fix no
+    parameter's range.
+    """
     results = {}
     for spec in SPECS:
         result = load_fit(spec, suite, burn_in, thin, n_prior)
@@ -1289,7 +1451,7 @@ def run_suite(suite, burn_in=0, thin=1, n_prior=50_000,
         display(covariance.round(5))
         print(f"{coefficient_label} physical-coefficient posterior correlation")
         display(correlation.round(3))
-        fit_figure = plot_fit(result)
+        fit_figure = plot_fit(result, axis_ranges=axis_ranges)
         if save_figures:
             paths = _save_figure(
                 fit_figure, suite, spec.key, "physical_parameter_marginals",
@@ -1301,6 +1463,7 @@ def run_suite(suite, burn_in=0, thin=1, n_prior=50_000,
         corner_figure = plot_corner(
             result, show_all_coefficients=show_all_coefficients,
             show_prior=show_prior_in_corner and not spec.uniform_prior,
+            axis_ranges=axis_ranges,
         )
         if save_figures:
             paths = _save_figure(
@@ -1315,6 +1478,7 @@ def run_suite(suite, burn_in=0, thin=1, n_prior=50_000,
                 result,
                 show_prior=show_prior_in_corner,
                 show_ma_prior=not spec.uniform_prior,
+                axis_ranges=axis_ranges,
             )
             if save_figures:
                 paths = _save_figure(
@@ -1327,6 +1491,7 @@ def run_suite(suite, burn_in=0, thin=1, n_prior=50_000,
         elif spec.nuisance_branches:
             nuisance_figure = plot_zexp_nuisance_corner(
                 result, show_prior=show_prior_in_corner,
+                axis_ranges=axis_ranges,
             )
             if save_figures:
                 paths = _save_figure(

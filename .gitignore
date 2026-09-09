@@ -2,6 +2,7 @@
 *.png
 *.pdf
 figs/
+tables/
 
 # Python/Jupyter transient files
 __pycache__/

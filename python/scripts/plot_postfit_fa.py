@@ -56,7 +56,7 @@ def main():
     )
     output = args.output or FIGURE_ROOT / args.suite / "fa_postfit_summary"
     output.parent.mkdir(parents=True, exist_ok=True)
-    for extension in ("pdf", "png"):
+    for extension in ("pdf",):
         path = output.with_suffix(f".{extension}")
         fig.savefig(path, dpi=600, bbox_inches="tight", pad_inches=.03,
                     facecolor="white")
