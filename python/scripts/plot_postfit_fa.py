@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 from postfit_physical_parameters import (
     FIGURE_ROOT, SPECS, load_fit, plot_fa_summary,
 )
+from spline_reweighting import describe_ess
 
 
 # These are the two main figure switches. Use fit keys listed by --list.
@@ -49,6 +50,9 @@ def main():
         if result is None:
             parser.error(f"no unique PROfile ROOT file found for {key!r} in {args.suite!r}")
         results[key] = result
+        if result["reweighting"] is not None:
+            # Chains are importance-reweighted to the exact z-expansion response.
+            print(f"{key}: " + describe_ess(result["ess"], len(result["samples"])))
 
     fig = plot_fa_summary(
         results, show=args.show, comparison_prior=prior,

@@ -3,6 +3,13 @@
 The public entry point is :func:`run_suite`, used by the three compact
 notebooks beside the fit XML files.  Transforming the joint chain preserves
 correlations and non-Gaussian marginal shapes.
+
+Every z-expansion chain loaded by :func:`load_fit` is importance-reweighted to
+the exact (non-factorized) z-expansion response with the weights of
+:mod:`spline_reweighting`; the normalized weights are stored as
+``result["weights"]`` and used by every summary, band and corner plot here, so
+all posterior quantities correct PROfit's multiplicative combination of the
+one-dimensional PCA splines.  Dipole-M_A fits keep uniform weights.
 """
 
 from dataclasses import dataclass
@@ -42,6 +49,20 @@ from zexp_reweighting import (  # noqa: E402
     MINERVA_LQCD_K7_PRIOR,
     MINERVA_LQCD_K6_PRIOR,
     complete_zexp_a_values,
+)
+
+# Importance reweighting of the chains to the exact z-expansion response. The
+# dchi2 grids it needs are produced by notebook 12.
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+from spline_reweighting import (  # noqa: E402
+    compute_importance_weights,
+    describe_ess,
+    load_dchi2_grid,
+    uniform_weights,
+    weighted_covariance,
+    weighted_quantile,
 )
 
 
@@ -330,7 +351,30 @@ def _truncated_standard_normal(rng, size, low, high):
     return values
 
 
-def load_fit(spec, suite, burn_in=0, thin=1, n_prior=50_000, seed=2026):
+def _correlation_from_covariance(covariance):
+    sigma = np.sqrt(np.diag(covariance))
+    with np.errstate(invalid="ignore", divide="ignore"):
+        correlation = covariance / np.outer(sigma, sigma)
+    return np.where(np.isfinite(correlation), correlation, 0.0)
+
+
+def load_fit(spec, suite, burn_in=0, thin=1, n_prior=50_000, seed=2026,
+             spline_reweight=True):
+    """Load one fit's chain and transform it to physical parameters.
+
+    For z-expansion fits the chain is importance-reweighted to the exact
+    z-expansion response (``spline_reweight=True``, the default): the
+    tabulated ``dchi2_data`` grid of notebook 12 is loaded with
+    :func:`spline_reweighting.load_dchi2_grid` and every sample receives the
+    weight ``exp(+dchi2_data/2)``.  The normalized weights are returned as
+    ``result["weights"]`` together with ``weights_raw``, ``ess``,
+    ``dchi2_samples`` and a ``reweighting`` provenance dict, and they enter the
+    summary table, the covariance and every plotting function of this module.
+    A missing grid raises ``FileNotFoundError`` (run notebook 12 first); pass
+    ``spline_reweight=False`` only to reproduce the uncorrected chain.
+    Dipole-M_A fits have no factorized z-expansion splines and keep uniform
+    weights (``reweighting=None``).
+    """
     root_file = _root_file(suite, spec.key)
     if root_file is None:
         return None
@@ -404,10 +448,35 @@ def load_fit(spec, suite, burn_in=0, thin=1, n_prior=50_000, seed=2026):
         sigma = np.sqrt(np.diag(pull_variance * matrix @ matrix.T))
         names = [f"a{i}" for i in range(len(central))]
 
-    q16, median, q84 = np.quantile(samples, [0.16, 0.50, 0.84], axis=0)
+    # Importance weights correcting PROfit's multiplicative spline combination
+    # to the exact z-expansion response (see spline_reweighting.py). Uniform
+    # for dipole-M_A fits and when spline_reweight=False.
+    n_samples = len(samples)
+    weights = uniform_weights(n_samples)
+    weights_raw = np.ones(n_samples)
+    ess = float(n_samples)
+    dchi2_samples = np.zeros(n_samples)
+    reweighting = None
+    eta_samples = None
+    if not is_ma_fit:
+        eta_samples = np.array(pulls[:, :n_axial], dtype=float)
+        if spline_reweight:
+            grid = load_dchi2_grid(spec.key, suite)
+            weights_raw, weights, ess, dchi2_samples = compute_importance_weights(
+                eta_samples, grid
+            )
+            reweighting = dict(
+                grid_type=grid["grid_type"], grid_path=str(grid["path"]),
+                grid_prior=grid.get("prior"), n_samples=n_samples, ess=ess,
+                ess_fraction=ess / n_samples,
+                max_abs_dchi2=float(np.abs(dchi2_samples).max()),
+            )
+
+    posterior_mean = np.average(samples, weights=weights, axis=0)
+    q16, median, q84 = weighted_quantile(samples, weights, [0.16, 0.50, 0.84])
     summary = pd.DataFrame({
         "prior_central": central, "prior_sigma": sigma,
-        "profile_best_fit": profile, "posterior_mean": samples.mean(axis=0),
+        "profile_best_fit": profile, "posterior_mean": posterior_mean,
         "posterior_median": median, "q16": q16, "q84": q84,
         "minus_1sigma": median - q16, "plus_1sigma": q84 - median,
     }, index=names)
@@ -421,12 +490,12 @@ def load_fit(spec, suite, burn_in=0, thin=1, n_prior=50_000, seed=2026):
         joint_indices = np.arange(1, len(spec.prior.free_a_values) + 1)
     joint_samples = samples[:, joint_indices]
     joint_names = [names[i] for i in joint_indices]
+    covariance_matrix = weighted_covariance(joint_samples, weights)
     covariance = pd.DataFrame(
-        np.atleast_2d(np.cov(joint_samples, rowvar=False)),
-        index=joint_names, columns=joint_names,
+        covariance_matrix, index=joint_names, columns=joint_names,
     )
     correlation = pd.DataFrame(
-        np.atleast_2d(np.corrcoef(joint_samples, rowvar=False)),
+        _correlation_from_covariance(covariance_matrix),
         index=joint_names, columns=joint_names,
     )
     result = dict(spec=spec, root_file=root_file, central=central, sigma=sigma,
@@ -434,7 +503,10 @@ def load_fit(spec, suite, burn_in=0, thin=1, n_prior=50_000, seed=2026):
                   q16=q16, q84=q84, names=names, summary=summary,
                   covariance=covariance, correlation=correlation,
                   joint_indices=joint_indices, joint_samples=joint_samples,
-                  joint_names=joint_names)
+                  joint_names=joint_names,
+                  weights=weights, weights_raw=weights_raw, ess=ess,
+                  dchi2_samples=dchi2_samples, reweighting=reweighting,
+                  eta_samples=eta_samples)
     if is_ma_fit:
         result.update(
             ma_joint_samples=ma_joint_samples,
@@ -489,9 +561,15 @@ def _credible_density_levels(histogram, probabilities=(0.95, 0.68)):
     return sorted(set(threshold for threshold in thresholds if threshold > 0))
 
 
-def _smooth_density(samples, bins):
-    """Return a lightly smoothed 1D histogram density for line display."""
-    density, edges = np.histogram(samples, bins=max(80, 2 * bins), density=True)
+def _smooth_density(samples, bins, weights=None):
+    """Return a lightly smoothed 1D histogram density for line display.
+
+    ``weights`` are the normalized importance weights of the samples (``None``
+    for unweighted prior draws).
+    """
+    density, edges = np.histogram(
+        samples, bins=max(80, 2 * bins), density=True, weights=weights
+    )
     centers = (edges[:-1] + edges[1:]) / 2
     radius, sigma = 5, 1.5
     offsets = np.arange(-radius, radius + 1)
@@ -659,6 +737,7 @@ def plot_distribution_overlay(results, selections, bins=55,
     common_basis = None
     for index, (key, distribution) in enumerate(selections):
         spec = fit_specs.get(key)
+        weights = None
         if distribution == "prior":
             if key in results and results[key]["spec"].prior is not None:
                 result = results[key]
@@ -683,6 +762,7 @@ def plot_distribution_overlay(results, selections, bins=55,
                 )
             spec = result["spec"]
             coefficients = result["samples"]
+            weights = result.get("weights")
             prior = spec.prior
             t0, t_cut = prior.t0_gev2, prior.t_cut_gev2
             prior_text = prior_label(spec)
@@ -706,18 +786,21 @@ def plot_distribution_overlay(results, selections, bins=55,
         if not np.all(np.isfinite(values)):
             raise ValueError(f"{key!r} contains non-finite a1/a2 samples")
         color = FA_SOURCE_COLORS.get(key, f"C{index % 10}")
-        distributions.append((key, distribution, spec, prior_text, values, color))
+        distributions.append(
+            (key, distribution, spec, prior_text, values, color, weights)
+        )
 
     # With a single prior in the figure, posteriors need not name it.
     single_prior = len({item[3] for item in distributions}) == 1
     distributions = [
         (labels.get(f"{key} prior", prior_text) if distribution == "prior"
          else labels.get(key, posterior_label(spec, single_prior)),
-         values, color, distribution)
-        for key, distribution, spec, prior_text, values, color in distributions
+         values, color, distribution, weights)
+        for key, distribution, spec, prior_text, values, color, weights
+        in distributions
     ]
 
-    joined = np.concatenate([values for _, values, _, _ in distributions])
+    joined = np.concatenate([values for _, values, _, _, _ in distributions])
     xlow, ylow = np.quantile(joined, 0.001, axis=0)
     xhigh, yhigh = np.quantile(joined, 0.999, axis=0)
     xpad = .05 * (xhigh - xlow) if xhigh > xlow else .5
@@ -727,9 +810,10 @@ def plot_distribution_overlay(results, selections, bins=55,
 
     with mpl.rc_context(PUBLICATION_RC):
         fig, ax = plt.subplots(figsize=figsize, constrained_layout=True)
-    for label, values, color, distribution in distributions:
+    for label, values, color, distribution, weights in distributions:
         histogram, xedges, yedges = np.histogram2d(
             values[:, 0], values[:, 1], bins=bins, range=plot_range,
+            weights=weights,
         )
         smoothed = _smooth_density_2d(histogram)
         levels = _credible_density_levels(smoothed)
@@ -753,7 +837,7 @@ def plot_distribution_overlay(results, selections, bins=55,
     handles = [Line2D([], [], color=color, lw=1.6,
                       ls="-" if distribution == "posterior" else "--",
                       label=label)
-               for label, _, color, distribution in distributions]
+               for label, _, color, distribution, _ in distributions]
     ax.legend(handles=handles, loc="best", fontsize=10.5,
               handlelength=2.4, labelspacing=.45)
     return fig
@@ -792,18 +876,20 @@ def plot_ma_posterior_overlay(results,
             expected_names = names
         elif names != expected_names:
             raise ValueError("Selected M_A posteriors use different parameters")
-        overlays.append((key, result["spec"], samples, colors[index % len(colors)]))
+        overlays.append((key, result["spec"], samples,
+                         colors[index % len(colors)], result.get("weights")))
 
     # Standard legend text; ``labels`` (keyed by fit key) overrides entries.
     labels = dict(labels or {})
-    single_prior = len({prior_label(spec) for _, spec, _, _ in overlays}) == 1
+    single_prior = len({prior_label(spec) for _, spec, _, _, _ in overlays}) == 1
     overlays = [
-        (labels.get(key, posterior_label(spec, single_prior)), samples, color)
-        for key, spec, samples, color in overlays
+        (labels.get(key, posterior_label(spec, single_prior)), samples, color,
+         weights)
+        for key, spec, samples, color, weights in overlays
     ]
 
     n = len(expected_names)
-    joined = np.concatenate([samples for _, samples, _ in overlays], axis=0)
+    joined = np.concatenate([samples for _, samples, _, _ in overlays], axis=0)
     ranges = []
     for coordinate in range(n):
         low, high = np.quantile(joined[:, coordinate], [0.001, 0.999])
@@ -818,14 +904,16 @@ def plot_ma_posterior_overlay(results,
             if row < col:
                 ax.set_visible(False)
                 continue
-            for label, samples, color in overlays:
+            for label, samples, color, weights in overlays:
                 if row == col:
-                    centers, density = _smooth_density(samples[:, col], bins)
+                    centers, density = _smooth_density(
+                        samples[:, col], bins, weights
+                    )
                     ax.plot(centers, density, color=color, lw=2.0)
                 else:
                     histogram, xedges, yedges = np.histogram2d(
                         samples[:, col], samples[:, row], bins=bins,
-                        range=[ranges[col], ranges[row]],
+                        range=[ranges[col], ranges[row]], weights=weights,
                     )
                     smoothed = _smooth_density_2d(histogram)
                     levels = _credible_density_levels(smoothed)
@@ -855,7 +943,7 @@ def plot_ma_posterior_overlay(results,
             ax.grid(color="#9AA4B2", alpha=.15, linewidth=.6)
 
     handles = [Line2D([], [], color=color, lw=1.8, label=label)
-               for label, _, color in overlays]
+               for label, _, color, _ in overlays]
     # Lay out the corner panels without the legend. An axes-attached legend
     # outside the first diagonal panel makes tight_layout reserve a large gap
     # between every column, dramatically shrinking the plots.
@@ -890,6 +978,9 @@ def plot_corner(result, bins=35, show_all_coefficients=False,
     best_fit_color = "#000000"
     prior_color = "#D62728"
     samples, names, indices = _diagnostic_view(result, show_all_coefficients)
+    # Normalized importance weights of the chain (spline_reweighting.py);
+    # prior draws stay unweighted.
+    weights = result.get("weights")
     if axis_names is None:
         axis_names = names
     elif len(axis_names) != len(names):
@@ -929,7 +1020,7 @@ def plot_corner(result, bins=35, show_all_coefficients=False,
                 ax.set_visible(False)
                 continue
             if row == col:
-                centers, density = _smooth_density(samples[:, col], bins)
+                centers, density = _smooth_density(samples[:, col], bins, weights)
                 ax.plot(centers, density, color=posterior_color, lw=1.8)
                 if prior_mask[col]:
                     prior_centers, prior_density = _smooth_density(
@@ -938,7 +1029,9 @@ def plot_corner(result, bins=35, show_all_coefficients=False,
                     ax.plot(prior_centers, prior_density, color=prior_color,
                             lw=1.2, alpha=.6)
                 ax.axvline(profile[col], color=best_fit_color, ls="--", lw=1.5)
-                q16, median, q84 = np.quantile(samples[:, col], [.16, .50, .84])
+                q16, median, q84 = weighted_quantile(
+                    samples[:, col], weights, [.16, .50, .84]
+                )
                 central, minus, plus = _format_interval(
                     median, median - q16, q84 - median
                 )
@@ -960,7 +1053,7 @@ def plot_corner(result, bins=35, show_all_coefficients=False,
                 ax.set_yticks([])
             else:
                 histogram, xedges, yedges = np.histogram2d(
-                    samples[:, col], samples[:, row], bins=bins
+                    samples[:, col], samples[:, row], bins=bins, weights=weights
                 )
                 histogram = _smooth_density_2d(histogram)
                 levels = _credible_density_levels(histogram)
@@ -1116,6 +1209,7 @@ def plot_fit(result, bins=45, axis_ranges=None):
         top.hist(result["prior_samples"][:, i], edges, density=True,
                  histtype="step", color="C3", lw=1.4, label="Prior")
         top.hist(result["samples"][:, i], edges, density=True,
+                 weights=result.get("weights"),
                  histtype="stepfilled", color="C0", alpha=.4, label="Posterior")
         top.axvline(result["profile"][i], color="k", ls="--", label="Best fit")
         top.axvspan(result["q16"][i], result["q84"][i], color="C1", alpha=.18,
@@ -1169,27 +1263,39 @@ def _save_figure(fig, suite, fit, stem, output_dir, dpi, formats):
     return saved
 
 
-def _fa_curves(result, q2, use_prior=False, max_samples=20_000, seed=2026):
-    """Evaluate F_A for a representative subset of a fit's joint samples."""
+def _fa_curves(result, q2, use_prior=False, max_samples=20_000, seed=2026,
+               return_weights=False):
+    """Evaluate F_A for a representative subset of a fit's joint samples.
+
+    With ``return_weights=True`` the normalized importance weights of the
+    selected samples are returned as well (``(curves, weights)``); they are
+    uniform for prior draws and for dipole-M_A fits and must be used for any
+    posterior band or moment (see :mod:`spline_reweighting`).
+    """
     samples = result["prior_samples" if use_prior else "samples"]
+    weights = None if use_prior else result.get("weights")
+    if weights is None:
+        weights = uniform_weights(len(samples))
     if len(samples) > max_samples:
         indices = np.random.default_rng(seed).choice(
             len(samples), size=max_samples, replace=False
         )
         samples = samples[indices]
+        weights = weights[indices] / weights[indices].sum()
     if result["spec"].prior is None:
         # GENIE convention used throughout this analysis: F_A(0) < 0.
-        return -1.2723 / (1 + q2[None, :] / samples[:, :1] ** 2) ** 2
-
-    prior = result["spec"].prior
-    z = (
-        np.sqrt(prior.t_cut_gev2 + q2)
-        - np.sqrt(prior.t_cut_gev2 - prior.t0_gev2)
-    ) / (
-        np.sqrt(prior.t_cut_gev2 + q2)
-        + np.sqrt(prior.t_cut_gev2 - prior.t0_gev2)
-    )
-    return samples @ np.vander(z, N=samples.shape[1], increasing=True).T
+        curves = -1.2723 / (1 + q2[None, :] / samples[:, :1] ** 2) ** 2
+    else:
+        prior = result["spec"].prior
+        z = (
+            np.sqrt(prior.t_cut_gev2 + q2)
+            - np.sqrt(prior.t_cut_gev2 - prior.t0_gev2)
+        ) / (
+            np.sqrt(prior.t_cut_gev2 + q2)
+            + np.sqrt(prior.t_cut_gev2 - prior.t0_gev2)
+        )
+        curves = samples @ np.vander(z, N=samples.shape[1], increasing=True).T
+    return (curves, weights) if return_weights else curves
 
 
 @mpl.rc_context(PUBLICATION_RC)
@@ -1316,8 +1422,10 @@ def plot_fa_summary(results, show=None, comparison_prior=None,
 
     for i, key in enumerate(selected):
         result = results[key]
-        curves = _fa_curves(result, q2, max_samples=max_samples)
-        low, median, high = np.quantile(curves, [.16, .50, .84], axis=0)
+        curves, curve_weights = _fa_curves(
+            result, q2, max_samples=max_samples, return_weights=True
+        )
+        low, median, high = weighted_quantile(curves, curve_weights, [.16, .50, .84])
         low, median, high = -high, -median, -low
         color = FA_SOURCE_COLORS.get(key, f"C{i % 10}")
         linestyle = linestyles[(i // 8) % len(linestyles)]
@@ -1427,6 +1535,12 @@ def run_suite(suite, burn_in=0, thin=1, n_prior=50_000,
         print(f'\n{spec.title}\n{result["root_file"]}')
         n_retained = len(result["samples"])
         print(f"Retained posterior samples after burn-in/thinning: {n_retained:,}")
+        if result["reweighting"] is not None:
+            print(describe_ess(result["ess"], n_retained)
+                  + f" after the spline-factorization correction "
+                  f"({result['reweighting']['grid_type']} dchi2 grid, "
+                  f"max |dchi2| at the samples "
+                  f"{result['reweighting']['max_abs_dchi2']:.3g})")
         if n_retained < 20_000:
             print("WARNING: fewer than 20,000 retained posterior samples; "
                   "also check effective sample size and convergence.")
@@ -1438,12 +1552,12 @@ def run_suite(suite, burn_in=0, thin=1, n_prior=50_000,
         diagnostic_samples, diagnostic_names, _ = _diagnostic_view(
             result, show_all_coefficients
         )
+        covariance_matrix = weighted_covariance(diagnostic_samples, result["weights"])
         covariance = pd.DataFrame(
-            np.atleast_2d(np.cov(diagnostic_samples, rowvar=False)),
-            index=diagnostic_names, columns=diagnostic_names,
+            covariance_matrix, index=diagnostic_names, columns=diagnostic_names,
         )
         correlation = pd.DataFrame(
-            np.atleast_2d(np.corrcoef(diagnostic_samples, rowvar=False)),
+            _correlation_from_covariance(covariance_matrix),
             index=diagnostic_names, columns=diagnostic_names,
         )
         coefficient_label = "All" if show_all_coefficients else "Free"

@@ -8,3 +8,6 @@ tables/
 __pycache__/
 *.py[cod]
 .ipynb_checkpoints/
+
+# Working notes (long-form write-ups moved out of the notebooks)
+notes/
