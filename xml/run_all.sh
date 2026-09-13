@@ -8,6 +8,7 @@ nthreads="${NTHREADS:-8}"
 stages="${STAGES:-plot profile}"
 dry_run="${DRY_RUN:-0}"
 plot_with_splines="${PLOT_WITH_SPLINES:-1}"
+plot_with_covar="${PLOT_WITH_COVAR:-1}"
 fit_name="${FIT:-}"
 mcmc_iterations="${MCMC_ITERATIONS:-}"
 mcmc_burnin="${MCMC_BURNIN:-}"
@@ -191,6 +192,12 @@ for family in "${families[@]}"; do
             subcommand_args=()
             if [[ "${stage}" == "plot" && "${plot_with_splines}" == "1" ]]; then
                 subcommand_args+=(--with-splines)
+            fi
+            # --with-covar is off by default in PROfit, but the Covariance directory it
+            # writes is what 12_spline_factorization_validation.ipynb reads as the
+            # fractional covariance. Without it that notebook cannot build its grids.
+            if [[ "${stage}" == "plot" && "${plot_with_covar}" == "1" ]]; then
+                subcommand_args+=(--with-covar)
             fi
             if [[ "${stage}" == "profile" ]]; then
                 if [[ -n "${mcmc_iterations}" ]]; then
