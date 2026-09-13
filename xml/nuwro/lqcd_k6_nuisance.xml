@@ -2,7 +2,7 @@
 
 <mode name="nu" />
 
-<detector name="uBooNE" pot="9.3221e19"/>
+<detector name="uBooNE" pot="1.75e21"/>
 
 <channel name="numuCC1p" plotname="log10(Q^2 / GeV^2) vs. p_n">
 	<bins2D
@@ -112,10 +112,10 @@
 	<systematic type="spline_cross_quad" binning="var0" plotname="FAzexpLQCDK6CROSS" tag="QE" force_0_cv="true" include_only_weights="1,2" splines="weight_spline_FAzexpLQCDK6PCA1, weight_spline_FAzexpLQCDK6PCA2">weight_spline_FAzexpLQCDK6CROSS</systematic>
 	
 	<systematic type="spline_to_covariance" binning="var0" plotname="VecFFCCQEshape" knobvals="0, 1" tag="QE" force_0_cv="true" include_only_weights="1,2">VecFFCCQEshape_UBGenie</systematic>
-	<systematic type="spline_to_covariance" binning="var0" plotname="RPA_CCQE" tag="QE" force_0_cv="true" include_only_weights="1,2">RPA_CCQE_UBGenie</systematic>
+	<systematic type="spline" binning="var0" plotname="RPA_CCQE" tag="QE" force_0_cv="true" include_only_weights="1,2">RPA_CCQE_UBGenie</systematic>
 	<systematic type="spline_to_covariance" binning="var0" plotname="CoulombCCQE" tag="QE" force_0_cv="true" include_only_weights="1,2">CoulombCCQE_UBGenie</systematic>
 
-	<systematic type="spline_to_covariance" binning="var0" plotname="NormCCMEC" knobvals="-2, -1, 0, 1, 2, 3" tag="MEC" force_0_cv="true" include_only_weights="1,2">NormCCMEC_UBGenie</systematic>
+	<systematic type="spline" binning="var0" plotname="NormCCMEC" knobvals="-2, -1, 0, 1, 2, 3" tag="MEC" force_0_cv="true" include_only_weights="1,2">NormCCMEC_UBGenie</systematic>
 	<systematic type="spline_to_covariance" binning="var0" plotname="NormNCMEC" knobvals="-1, 0, 1, 2, 3" tag="MEC" force_0_cv="true" include_only_weights="1,2">NormNCMEC_UBGenie</systematic>
 	<systematic type="spline_to_covariance" binning="var0" plotname="XSecShape_CCMEC" knobvals="0, 1" tag="MEC" force_0_cv="true" include_only_weights="1,2">XSecShape_CCMEC_UBGenie</systematic>
 	<systematic type="spline_to_covariance" binning="var0" plotname="DecayAngMEC" knobvals="0, 1" tag="MEC" force_0_cv="true" include_only_weights="1,2">DecayAngMEC_UBGenie</systematic>
@@ -198,20 +198,19 @@
 </systematics>
 
 <data>
-  <!-- MicroBooNE open data at the measured 9.3221e19 POT exposure. -->
-  <MCFile treename="tree" filename="/nevis/riverside/data/epelaez/ngem/intermediate_files/minimal_withspline_df.root" pot="9.3221e19">
+  <MCFile treename="tree" filename="/nevis/riverside/data/epelaez/ngem/intermediate_files/minimal_withspline_df.root" pot="1.75e21">
 
     <branch
-            associated_subchannel = "nu_uBooNE_numuCC1p_data"
-            model_rule            = "0"
-            weight_1              = "isdata==1 && afro_1mu1p_sel==1"
-            weight_2              = "net_weight"
-        >
-        <variable2D>log10(afro_1mu1p_Q2);afro_1mu1p_Pn</variable2D>
-        <variable2D>0;0</variable2D>
-        <variable>0</variable>
-        <variable>0</variable>
-        <variable>0</variable>
-    </branch>
+        	associated_subchannel = "nu_uBooNE_numuCC1p_data"
+        	model_rule            = "0"
+			weight_1              = "isnuwro==1 && afro_1mu1p_sel==1"
+			weight_2              = "net_weight_nuwro"
+		>
+		<variable2D>log10(afro_1mu1p_Q2);afro_1mu1p_Pn</variable2D>
+		<variable2D>0;0</variable2D>
+		<variable>0</variable>
+		<variable>0</variable>
+		<variable>0</variable>
+	</branch>
   </MCFile>
 </data>

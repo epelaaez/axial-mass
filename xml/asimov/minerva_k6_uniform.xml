@@ -30,7 +30,7 @@
     <rule index="0" name="No Osc"/>
 </model>
 
-<MCFile treename="tree" filename="/nevis/riverside/data/epelaez/ngem/intermediate_files/minimal_withspline_df.root" pot="9.57e19">
+<MCFile treename="tree" filename="/nevis/riverside/data/epelaez/ngem/intermediate_files/minimal_withspline_df.root" pot="9.3221e19">
 
 	<branch
         	associated_subchannel = "nu_uBooNE_numuCC1p_numuCC1poverlay"
@@ -61,24 +61,28 @@
 </MCFile>
 
 <!-- Weighted mixture of the preliminary Run 4b and Run 5 detector variations. -->
+<!--
 <DetVarFiles>
-	<DetVarSection treename="tree" include_only_weights="1" extra_weight="net_weight" cv_variation_matching_vars="run,subrun,event">
+	<DetVarSection treename="tree" include_only_weights="1" extra_weight="net_weight" cv_variation_matching_vars="detvar_sample,run,subrun,event">
 
-		<cv filename="/nevis/riverside/data/epelaez/ngem/intermediate_files/minimal_detvar_CV_df.root" pot="9.57e19" />
+		<cv filename="/nevis/riverside/data/epelaez/ngem/intermediate_files/minimal_detvar_CV_df.root" pot="1" />
 
-		<variation name="Recomb2" filename="/nevis/riverside/data/epelaez/ngem/intermediate_files/minimal_detvar_Recomb2_df.root" pot="9.57e19" />
-		<variation name="LYAtt" filename="/nevis/riverside/data/epelaez/ngem/intermediate_files/minimal_detvar_LYAtt_df.root" pot="9.57e19" />
-		<variation name="LYDown" filename="/nevis/riverside/data/epelaez/ngem/intermediate_files/minimal_detvar_LYDown_df.root" pot="9.57e19" />
-		<variation name="LYRayleigh" filename="/nevis/riverside/data/epelaez/ngem/intermediate_files/minimal_detvar_LYRayleigh_df.root" pot="9.57e19" />
-		<variation name="SCE" filename="/nevis/riverside/data/epelaez/ngem/intermediate_files/minimal_detvar_SCE_df.root" pot="9.57e19" />
-		<variation name="WireModX" filename="/nevis/riverside/data/epelaez/ngem/intermediate_files/minimal_detvar_WireModX_df.root" pot="9.57e19" />
-		<variation name="WireModYZ" filename="/nevis/riverside/data/epelaez/ngem/intermediate_files/minimal_detvar_WireModYZ_df.root" pot="9.57e19" />
+		<variation name="Recomb2" filename="/nevis/riverside/data/epelaez/ngem/intermediate_files/minimal_detvar_Recomb2_df.root" pot="1" />
+		<variation name="LYAtt" filename="/nevis/riverside/data/epelaez/ngem/intermediate_files/minimal_detvar_LYAtt_df.root" pot="1" />
+		<variation name="LYDown" filename="/nevis/riverside/data/epelaez/ngem/intermediate_files/minimal_detvar_LYDown_df.root" pot="1" />
+		<variation name="LYRayleigh" filename="/nevis/riverside/data/epelaez/ngem/intermediate_files/minimal_detvar_LYRayleigh_df.root" pot="1" />
+		<variation name="SCE" filename="/nevis/riverside/data/epelaez/ngem/intermediate_files/minimal_detvar_SCE_df.root" pot="1" />
+		<variation name="WireModX" filename="/nevis/riverside/data/epelaez/ngem/intermediate_files/minimal_detvar_WireModX_df.root" pot="1" />
+		<variation name="WireModYZ" filename="/nevis/riverside/data/epelaez/ngem/intermediate_files/minimal_detvar_WireModYZ_df.root" pot="1" />
+		<variation name="WireModThetaXZ" filename="/nevis/riverside/data/epelaez/ngem/intermediate_files/minimal_detvar_WireModThetaXZ_df.root" pot="1" />
+		<variation name="WireModThetaYZ" filename="/nevis/riverside/data/epelaez/ngem/intermediate_files/minimal_detvar_WireModThetaYZ_df.root" pot="1" />
 
 		<subchannel>nu_uBooNE_numuCC1p_numuCC1poverlay</subchannel>
 		<subchannel>nu_uBooNE_numuCC1p_nonnumuCC1poverlay</subchannel>
 
 	</DetVarSection>
 </DetVarFiles>
+-->
 
 <systematics>
 
@@ -86,6 +90,7 @@
 	<systematic type="mcstat" plotname="MC Stats" tag="other">MCStat</systematic>
 
 	<!-- Detector variation systematics -->
+<!--
 	<systematic name="Recomb2" type="spline_to_covariance" plotname="Recomb2" tag="DetVar" />
 	<systematic name="LYAtt" type="spline_to_covariance" plotname="LYAtt" tag="DetVar" />
 	<systematic name="LYDown" type="spline_to_covariance" plotname="LYDown" tag="DetVar" />
@@ -93,6 +98,9 @@
 	<systematic name="SCE" type="spline_to_covariance" plotname="SCE" tag="DetVar" />
 	<systematic name="WireModX" type="spline_to_covariance" plotname="WireModX" tag="DetVar" />
 	<systematic name="WireModYZ" type="spline_to_covariance" plotname="WireModYZ" tag="DetVar" />
+	<systematic name="WireModThetaXZ" type="spline_to_covariance" plotname="WireModThetaXZ" tag="DetVar" />
+	<systematic name="WireModThetaYZ" type="spline_to_covariance" plotname="WireModThetaYZ" tag="DetVar" />
+-->
 
     <!-- Cross Section Systematics, 55 splines -->
 
@@ -101,6 +109,7 @@
 
 	<systematic type="spline" prior_type="uniform" binning="var0" plotname="FAzexpMinervaK6PCA1" restrict="-10, 10" tag="QE" force_0_cv="true" include_only_weights="1,2">weight_spline_FAzexpMinervaK6PCA1</systematic>
 	<systematic type="spline" prior_type="uniform" binning="var0" plotname="FAzexpMinervaK6PCA2" restrict="-10, 10" tag="QE" force_0_cv="true" include_only_weights="1,2">weight_spline_FAzexpMinervaK6PCA2</systematic>
+	<systematic type="spline_cross_quad" binning="var0" plotname="FAzexpMinervaK6CROSS" tag="QE" force_0_cv="true" include_only_weights="1,2" splines="weight_spline_FAzexpMinervaK6PCA1, weight_spline_FAzexpMinervaK6PCA2">weight_spline_FAzexpMinervaK6CROSS</systematic>
 	
 	<systematic type="spline_to_covariance" binning="var0" plotname="VecFFCCQEshape" knobvals="0, 1" tag="QE" force_0_cv="true" include_only_weights="1,2">VecFFCCQEshape_UBGenie</systematic>
 	<systematic type="spline_to_covariance" binning="var0" plotname="RPA_CCQE" tag="QE" force_0_cv="true" include_only_weights="1,2">RPA_CCQE_UBGenie</systematic>
