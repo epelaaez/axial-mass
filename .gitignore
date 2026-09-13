@@ -9,5 +9,9 @@ __pycache__/
 *.py[cod]
 .ipynb_checkpoints/
 
-# Working notes (long-form write-ups moved out of the notebooks)
+# Working notes and testing
 notes/
+xml_testing/
+
+# Backups 
+*.gz
