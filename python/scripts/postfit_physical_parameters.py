@@ -4,12 +4,12 @@ The public entry point is :func:`run_suite`, used by the three compact
 notebooks beside the fit XML files.  Transforming the joint chain preserves
 correlations and non-Gaussian marginal shapes.
 
-Every z-expansion chain loaded by :func:`load_fit` is importance-reweighted to
-the exact (non-factorized) z-expansion response with the weights of
-:mod:`spline_reweighting`; the normalized weights are stored as
-``result["weights"]`` and used by every summary, band and corner plot here, so
-all posterior quantities correct PROfit's multiplicative combination of the
-one-dimensional PCA splines.  Dipole-M_A fits keep uniform weights.
+Posterior quantities are read straight from the chains.  The z-expansion XMLs
+carry a ``type="spline_cross_quad"`` systematic, so PROfit's own response is
+already exact in the cross terms and no post-hoc correction is applied here.
+(Before that systematic existed the chains were importance-reweighted instead;
+that route survives only in ``python/notebooks/14_cross_branch_validation.ipynb``,
+which checks the two agree.)
 """
 
 from dataclasses import dataclass
@@ -23,6 +23,7 @@ from matplotlib.legend_handler import HandlerTuple
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 from matplotlib.text import Text
+from matplotlib.ticker import AutoMinorLocator, MaxNLocator
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 import numpy as np
@@ -51,32 +52,32 @@ from zexp_reweighting import (  # noqa: E402
     complete_zexp_a_values,
 )
 
-# Importance reweighting of the chains to the exact z-expansion response. The
-# dchi2 grids it needs are produced by notebook 12.
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
-from spline_reweighting import (  # noqa: E402
-    compute_importance_weights,
-    describe_ess,
-    load_dchi2_grid,
-    uniform_weights,
-    weighted_covariance,
-    weighted_quantile,
-)
 
 
-DATA_ROOT = Path("/nevis/riverside/data/epelaez/ma_zexp/1mu1p_sel")
+def _quantile(samples, quantiles):
+    """Column-wise quantiles, mid-point (Hazen) convention.
+
+    ``method="hazen"`` places the k-th of n order statistics at (k - 0.5) / n,
+    which is the convention every published interval here was produced with;
+    numpy's default ``"linear"`` differs by ~1e-3 on these chains.
+    """
+    return np.quantile(np.asarray(samples, dtype=float), quantiles, axis=0,
+                       method="hazen")
+
+
+DATA_ROOT = Path("/nevis/hopper/data/epelaez/axial_mass")
 FIGURE_ROOT = Path(__file__).resolve().parents[2] / "figs"
-# Fit outputs live at DATA_ROOT/<data dir>/<fit>/. Notebooks and figure paths
-# keep the run_all.sh suite names (nuwro_fit_results, asimov_fit_results,
-# opendata_fit_results); SUITE_DATA_DIRS maps them to the on-disk directory.
-# While the new *_fit_results production is being debugged, read the earlier
-# zexp_prior_fits* outputs instead.
+# Fit outputs live at DATA_ROOT/<data dir>/<fit>/, written by xml/run_all.sh.
+# The on-disk directories are the run_all.sh suite names, so SUITE_DATA_DIRS is
+# the identity; it stays as a hook for reading a differently-named production
+# (it previously redirected to the earlier zexp_prior_fits* outputs).
 SUITE_DATA_DIRS = {
-    "nuwro_fit_results": "zexp_prior_fits",
-    "asimov_fit_results": "zexp_prior_fits_asimov",
-    "opendata_fit_results": "zexp_prior_fits_opendata",
+    "nuwro_fit_results": "nuwro_fit_results",
+    "asimov_fit_results": "asimov_fit_results",
+    "opendata_fit_results": "opendata_fit_results",
 }
 
 PUBLICATION_RC = {
@@ -118,6 +119,18 @@ FA_SOURCE_COLORS = {
     "ma": "#0072B2",
     "ma_no_axff": "#0072B2",
 }
+
+# Contour style for plot_distribution_overlay. Each prior gets its own broken
+# line so that priors which nearly coincide stay distinguishable where they
+# overlap; the posterior is the only solid contour in the figure.
+PRIOR_DASH_PATTERNS = (
+    (0, (6.5, 3.0)),
+    (0, (1.4, 1.9)),
+    (0, (6.5, 2.2, 1.4, 2.2)),
+    (0, (3.0, 2.0)),
+)
+CONTOUR_CORE_ALPHA = .16
+CONTOUR_LINEWIDTHS = (1.0, 1.8)
 
 REFERENCE_PRIORS = {
     "minerva_k6": MINERVA_K6_PRIOR,
@@ -193,6 +206,14 @@ SPECS = (
             uniform_prior=True),
     FitSpec("lqcd_k6", r"LQCD (2026), $k_{\max}=6$", LQCD_K6_PRIOR,
             source="LQCD (2026)"),
+    FitSpec(
+        "lqcd_k6_nuisance",
+        r"LQCD (2026), $k_{\max}=6$, fitted nuisances",
+        LQCD_K6_PRIOR,
+        source="LQCD (2026)", variant="fitted nuisances",
+        nuisance_labels=("NormCCMEC", "RPA_CCQE"),
+        nuisance_branches=("NormCCMEC_UBGenie", "RPA_CCQE_UBGenie"),
+    ),
     FitSpec("lqcd_k7", r"LQCD (2026), $k_{\max}=7$", LQCD_K7_PRIOR,
             source="LQCD (2026)"),
     FitSpec("minerva_k6", r"MINERvA (2026), $k_{\max}=6$", MINERVA_K6_PRIOR,
@@ -288,8 +309,8 @@ REFERENCE_LABELS = {
 }
 
 
-def _root_file(suite, key):
-    directory = DATA_ROOT / SUITE_DATA_DIRS.get(suite, suite) / key
+def _root_file(suite, key, data_root=None):
+    directory = Path(data_root or DATA_ROOT) / SUITE_DATA_DIRS.get(suite, suite) / key
     preferred = directory / f"{key}_v1_PROfile.root"
     if preferred.exists():
         return preferred
@@ -359,23 +380,17 @@ def _correlation_from_covariance(covariance):
 
 
 def load_fit(spec, suite, burn_in=0, thin=1, n_prior=50_000, seed=2026,
-             spline_reweight=True):
+             data_root=None):
     """Load one fit's chain and transform it to physical parameters.
 
-    For z-expansion fits the chain is importance-reweighted to the exact
-    z-expansion response (``spline_reweight=True``, the default): the
-    tabulated ``dchi2_data`` grid of notebook 12 is loaded with
-    :func:`spline_reweighting.load_dchi2_grid` and every sample receives the
-    weight ``exp(+dchi2_data/2)``.  The normalized weights are returned as
-    ``result["weights"]`` together with ``weights_raw``, ``ess``,
-    ``dchi2_samples`` and a ``reweighting`` provenance dict, and they enter the
-    summary table, the covariance and every plotting function of this module.
-    A missing grid raises ``FileNotFoundError`` (run notebook 12 first); pass
-    ``spline_reweight=False`` only to reproduce the uncorrected chain.
-    Dipole-M_A fits have no factorized z-expansion splines and keep uniform
-    weights (``reweighting=None``).
+    ``data_root`` overrides :data:`DATA_ROOT` for this call, so a fit tree
+    outside the production tree can be read (the variant trees under
+    ``/nevis/hopper/data/epelaez/axial_mass_crosstest/<variant>/`` keep the same
+    ``<suite>/<fit>/`` layout below their root).
+
+    Returns ``None`` when the fit directory holds no ``*_v1_PROfile.root``.
     """
-    root_file = _root_file(suite, spec.key)
+    root_file = _root_file(suite, spec.key, data_root)
     if root_file is None:
         return None
 
@@ -390,7 +405,10 @@ def load_fit(spec, suite, burn_in=0, thin=1, n_prior=50_000, seed=2026,
         samples = central + sigma * pulls[:, :1]
         profile = central + sigma * profile_pull[:1]
         rng = np.random.default_rng(seed)
-        prior_pulls = (rng.uniform(-6.0, 6.0, size=(n_prior, 1))
+        # Mirrors restrict="-8, 8" on MACCQE in the ma_uniform XMLs, i.e.
+        # M_A in [0.3, 1.9] GeV. Keep the two in step or the prior drawn in the
+        # corner panels stops matching the prior the chain was sampled under.
+        prior_pulls = (rng.uniform(-8.0, 8.0, size=(n_prior, 1))
                        if spec.uniform_prior
                        else rng.normal(size=(n_prior, 1)))
         prior_samples = central + sigma * prior_pulls
@@ -448,32 +466,11 @@ def load_fit(spec, suite, burn_in=0, thin=1, n_prior=50_000, seed=2026,
         sigma = np.sqrt(np.diag(pull_variance * matrix @ matrix.T))
         names = [f"a{i}" for i in range(len(central))]
 
-    # Importance weights correcting PROfit's multiplicative spline combination
-    # to the exact z-expansion response (see spline_reweighting.py). Uniform
-    # for dipole-M_A fits and when spline_reweight=False.
     n_samples = len(samples)
-    weights = uniform_weights(n_samples)
-    weights_raw = np.ones(n_samples)
-    ess = float(n_samples)
-    dchi2_samples = np.zeros(n_samples)
-    reweighting = None
-    eta_samples = None
-    if not is_ma_fit:
-        eta_samples = np.array(pulls[:, :n_axial], dtype=float)
-        if spline_reweight:
-            grid = load_dchi2_grid(spec.key, suite)
-            weights_raw, weights, ess, dchi2_samples = compute_importance_weights(
-                eta_samples, grid
-            )
-            reweighting = dict(
-                grid_type=grid["grid_type"], grid_path=str(grid["path"]),
-                grid_prior=grid.get("prior"), n_samples=n_samples, ess=ess,
-                ess_fraction=ess / n_samples,
-                max_abs_dchi2=float(np.abs(dchi2_samples).max()),
-            )
+    eta_samples = None if is_ma_fit else np.array(pulls[:, :n_axial], dtype=float)
 
-    posterior_mean = np.average(samples, weights=weights, axis=0)
-    q16, median, q84 = weighted_quantile(samples, weights, [0.16, 0.50, 0.84])
+    posterior_mean = samples.mean(axis=0)
+    q16, median, q84 = _quantile(samples, [0.16, 0.50, 0.84])
     summary = pd.DataFrame({
         "prior_central": central, "prior_sigma": sigma,
         "profile_best_fit": profile, "posterior_mean": posterior_mean,
@@ -490,7 +487,7 @@ def load_fit(spec, suite, burn_in=0, thin=1, n_prior=50_000, seed=2026,
         joint_indices = np.arange(1, len(spec.prior.free_a_values) + 1)
     joint_samples = samples[:, joint_indices]
     joint_names = [names[i] for i in joint_indices]
-    covariance_matrix = weighted_covariance(joint_samples, weights)
+    covariance_matrix = np.atleast_2d(np.cov(joint_samples, rowvar=False))
     covariance = pd.DataFrame(
         covariance_matrix, index=joint_names, columns=joint_names,
     )
@@ -503,10 +500,7 @@ def load_fit(spec, suite, burn_in=0, thin=1, n_prior=50_000, seed=2026,
                   q16=q16, q84=q84, names=names, summary=summary,
                   covariance=covariance, correlation=correlation,
                   joint_indices=joint_indices, joint_samples=joint_samples,
-                  joint_names=joint_names,
-                  weights=weights, weights_raw=weights_raw, ess=ess,
-                  dchi2_samples=dchi2_samples, reweighting=reweighting,
-                  eta_samples=eta_samples)
+                  joint_names=joint_names, eta_samples=eta_samples)
     if is_ma_fit:
         result.update(
             ma_joint_samples=ma_joint_samples,
@@ -561,27 +555,32 @@ def _credible_density_levels(histogram, probabilities=(0.95, 0.68)):
     return sorted(set(threshold for threshold in thresholds if threshold > 0))
 
 
-def _smooth_density(samples, bins, weights=None):
-    """Return a lightly smoothed 1D histogram density for line display.
-
-    ``weights`` are the normalized importance weights of the samples (``None``
-    for unweighted prior draws).
-    """
-    density, edges = np.histogram(
-        samples, bins=max(80, 2 * bins), density=True, weights=weights
-    )
+def _smooth_density(samples, bins):
+    """Return a lightly smoothed 1D histogram density for line display."""
+    density, edges = np.histogram(samples, bins=max(80, 2 * bins), density=True)
     centers = (edges[:-1] + edges[1:]) / 2
     radius, sigma = 5, 1.5
     offsets = np.arange(-radius, radius + 1)
     kernel = np.exp(-.5 * (offsets / sigma) ** 2)
     kernel /= kernel.sum()
-    return centers, np.convolve(density, kernel, mode="same")
+    # Divide by the kernel's overlap with the histogram. Without this the
+    # convolution averages in the zeros beyond the first and last bin, which
+    # drags the curve towards zero exactly where a posterior piles up against
+    # a hard parameter bound.
+    coverage = np.convolve(np.ones_like(density), kernel, mode="same")
+    return centers, np.convolve(density, kernel, mode="same") / coverage
 
 
-def _smooth_density_2d(histogram):
-    """Apply a small separable Gaussian kernel to a 2D density estimate."""
-    offsets = np.arange(-3, 4)
-    kernel = np.exp(-.5 * (offsets / 1.0) ** 2)
+def _smooth_density_2d(histogram, sigma=1.0):
+    """Apply a small separable Gaussian kernel to a 2D density estimate.
+
+    ``sigma`` is in bins, so a finer binning needs a larger value to hold the
+    physical smoothing length fixed. The default reproduces the kernel every
+    caller used before the parameter existed.
+    """
+    radius = max(1, int(np.ceil(3 * sigma)))
+    offsets = np.arange(-radius, radius + 1)
+    kernel = np.exp(-.5 * (offsets / sigma) ** 2)
     kernel /= kernel.sum()
     smoothed = np.apply_along_axis(
         lambda values: np.convolve(values, kernel, mode="same"), 0, histogram
@@ -589,6 +588,55 @@ def _smooth_density_2d(histogram):
     return np.apply_along_axis(
         lambda values: np.convolve(values, kernel, mode="same"), 1, smoothed
     )
+
+
+def _density_grid_to_edges(xedges, yedges, density):
+    """Grid coordinates and density extended from bin centres to bin edges.
+
+    ``contour``/``contourf`` only draw between grid points, so a credible
+    region reaching the outermost bin stops half a bin short of the histogram
+    boundary. A histogram is piecewise constant across each bin, so repeating
+    the boundary bins out to the edges is the faithful reading of it rather
+    than an extrapolation, and it is what lets a posterior that piles up
+    against a hard parameter bound be drawn flush with that bound.
+    """
+    xcenters = (xedges[:-1] + xedges[1:]) / 2
+    ycenters = (yedges[:-1] + yedges[1:]) / 2
+    return (
+        np.concatenate(([xedges[0]], xcenters, [xedges[-1]])),
+        np.concatenate(([yedges[0]], ycenters, [yedges[-1]])),
+        np.pad(density, 1, mode="edge"),
+    )
+
+
+def _panel_binning(display_range, values, bins, max_growth=4):
+    """Histogram bounds and bin count for one axis of a corner panel.
+
+    The bounds cover the panel, or the contours stop inside it wherever
+    ``axis_ranges`` asks for a wider view than the chain reaches, and they
+    cover every sample, because discarding samples would renormalize the
+    credible levels. The bin count grows with the widened bounds so that the
+    bin width stays the one ``bins`` would have given over the samples alone,
+    which keeps the contour resolution independent of the requested view.
+    """
+    low = min(display_range[0], float(values.min()))
+    high = max(display_range[1], float(values.max()))
+    span = float(values.max() - values.min())
+    if span <= 0 or high <= low:
+        return (low, high), bins
+    widened = int(np.ceil(bins * (high - low) / span))
+    return (low, high), int(min(widened, max_growth * bins))
+
+
+def _style_corner_ticks(ax, x_only=False):
+    """Few, evenly spaced ticks that cannot collide across adjacent panels."""
+    ax.xaxis.set_major_locator(MaxNLocator(nbins=4, prune="both"))
+    ax.xaxis.set_minor_locator(AutoMinorLocator(2))
+    if not x_only:
+        ax.yaxis.set_major_locator(MaxNLocator(nbins=4, prune="both"))
+        ax.yaxis.set_minor_locator(AutoMinorLocator(2))
+    ax.tick_params(which="both", direction="in", top=True, right=True)
+    ax.tick_params(which="minor", length=1.8)
 
 
 def _format_interval(median, lower_error, upper_error):
@@ -635,6 +683,55 @@ def _scale_figure_fonts(figure, scale):
     """Scale every existing text artist, including ticks and offset text."""
     for artist in figure.findobj(match=Text):
         artist.set_fontsize(artist.get_fontsize() * scale)
+
+
+# Font sizes the reference corner draws at CORNER_REFERENCE_WIDTH. Every other
+# publication figure is placed at the same printed width, so a wider source
+# figure is shrunk more by LaTeX and has to grow these by its own width ratio
+# to print at the same size as the corners it sits beside.
+COLUMN_REFERENCE_FONT_SIZES = {
+    "tick": 7.0,
+    "legend": 7.5,
+    "title": 9.0,
+    "label": 10.0,
+}
+
+
+# The printed widths the paper's two-column REVTeX layout offers: one column,
+# which is what a `figure` gets and what the reference corner is placed at, and
+# the full text width, which only a `figure*` gets.
+COLUMN_WIDTH = 3.4
+TEXT_WIDTH = 7.0
+
+
+def column_font_sizes(figure_width, placed_width=COLUMN_WIDTH):
+    """Font sizes that print like the reference corner.
+
+    ``figure_width`` is the source figure's width in inches and
+    ``placed_width`` the width LaTeX places it at, so a figure wide enough to
+    need a `figure*` is compared against :data:`TEXT_WIDTH` rather than one
+    column.
+    """
+    scale = (figure_width / placed_width) * (COLUMN_WIDTH / CORNER_REFERENCE_WIDTH)
+    return {name: size * scale
+            for name, size in COLUMN_REFERENCE_FONT_SIZES.items()}
+
+
+def column_font_rc(figure_width, placed_width=COLUMN_WIDTH):
+    """rcParams to layer over PUBLICATION_RC for a figure this many inches wide.
+
+    Text set explicitly on an artist is not covered; pass it
+    :func:`column_font_sizes` instead.
+    """
+    sizes = column_font_sizes(figure_width, placed_width)
+    return {
+        "font.size": sizes["tick"],
+        "axes.labelsize": sizes["label"],
+        "axes.titlesize": sizes["title"],
+        "xtick.labelsize": sizes["tick"],
+        "ytick.labelsize": sizes["tick"],
+        "legend.fontsize": sizes["legend"],
+    }
 
 
 def _deuterium_prior_samples(size, seed):
@@ -712,8 +809,19 @@ def _fa_observables(coefficient_samples, t0_gev2, t_cut_gev2, q2_points):
 @mpl.rc_context(PUBLICATION_RC)
 def plot_distribution_overlay(results, selections, bins=55,
                               n_reference_samples=50_000, seed=2026,
-                              figsize=(7.0, 6.2), labels=None):
+                              figsize=(7.0, 6.2), labels=None, colors=None,
+                              smooth=1.0, legend_loc="upper center",
+                              legend_headroom=.30,
+                              note="68% and 95% credible regions"):
     """Overlay chosen priors/posteriors as contours in a common (a1, a2) basis.
+
+    The 68% credible region of each distribution is filled and its 68% and
+    95% boundaries are outlined; the posterior is solid and every prior takes
+    its own pattern from ``PRIOR_DASH_PATTERNS``, so priors that nearly
+    coincide can still be told apart where they overlap. Distributions are
+    drawn from the broadest to the most compact. ``smooth`` is the Gaussian
+    kernel width in bins, which a finer ``bins`` needs raised to keep the
+    contours as smooth.
 
     Each selection is ``(key, distribution)`` where distribution is ``"prior"``
     or ``"posterior"``. Priors may use any loaded fit key or the standalone
@@ -728,16 +836,29 @@ def plot_distribution_overlay(results, selections, bins=55,
     extended to ``"Posterior from <source> prior, ..."`` when the figure
     involves more than one prior. ``labels`` optionally overrides individual
     entries: key posteriors by fit key and priors by ``"<key> prior"``.
+
+    Contours take their color from :data:`FA_SOURCE_COLORS`, so one fit key
+    drawn as both a prior and a posterior would otherwise get that color
+    twice; ``colors`` overrides individual entries, keyed exactly like
+    ``labels``. ``note`` is the grey line above the axes, the place for
+    whatever every distribution shares (a common k_max, say) instead of
+    repeating it in every legend entry; pass ``""`` to drop it.
+
+    The legend is split into a priors column and a posteriors column, and
+    ``legend_headroom`` opens a band above the contours for it, as a fraction
+    of the plotted y range. The band is added to the axes only, so the density
+    estimate underneath is unchanged; set it to 0 when moving the legend to a
+    corner the contours already leave free.
     """
     if not selections:
         raise ValueError("Select at least one prior or posterior distribution")
     labels = dict(labels or {})
+    colors = dict(colors or {})
     fit_specs = {spec.key: spec for spec in SPECS if spec.prior is not None}
     distributions = []
     common_basis = None
     for index, (key, distribution) in enumerate(selections):
         spec = fit_specs.get(key)
-        weights = None
         if distribution == "prior":
             if key in results and results[key]["spec"].prior is not None:
                 result = results[key]
@@ -762,7 +883,6 @@ def plot_distribution_overlay(results, selections, bins=55,
                 )
             spec = result["spec"]
             coefficients = result["samples"]
-            weights = result.get("weights")
             prior = spec.prior
             t0, t_cut = prior.t0_gev2, prior.t_cut_gev2
             prior_text = prior_label(spec)
@@ -785,22 +905,23 @@ def plot_distribution_overlay(results, selections, bins=55,
         values = coefficients[:, 1:3]
         if not np.all(np.isfinite(values)):
             raise ValueError(f"{key!r} contains non-finite a1/a2 samples")
-        color = FA_SOURCE_COLORS.get(key, f"C{index % 10}")
-        distributions.append(
-            (key, distribution, spec, prior_text, values, color, weights)
+        color_key = f"{key} prior" if distribution == "prior" else key
+        color = colors.get(
+            color_key, FA_SOURCE_COLORS.get(key, f"C{index % 10}")
         )
+        distributions.append((key, distribution, spec, prior_text, values, color))
 
     # With a single prior in the figure, posteriors need not name it.
     single_prior = len({item[3] for item in distributions}) == 1
     distributions = [
         (labels.get(f"{key} prior", prior_text) if distribution == "prior"
          else labels.get(key, posterior_label(spec, single_prior)),
-         values, color, distribution, weights)
-        for key, distribution, spec, prior_text, values, color, weights
+         values, color, distribution)
+        for key, distribution, spec, prior_text, values, color
         in distributions
     ]
 
-    joined = np.concatenate([values for _, values, _, _, _ in distributions])
+    joined = np.concatenate([values for _, values, _, _ in distributions])
     xlow, ylow = np.quantile(joined, 0.001, axis=0)
     xhigh, yhigh = np.quantile(joined, 0.999, axis=0)
     xpad = .05 * (xhigh - xlow) if xhigh > xlow else .5
@@ -808,38 +929,99 @@ def plot_distribution_overlay(results, selections, bins=55,
     plot_range = [(xlow - xpad, xhigh + xpad),
                   (ylow - ypad, yhigh + ypad)]
 
+    # Print at the same text size as the corner figures beside it: this one is
+    # wider at the source, so LaTeX shrinks it further (see column_font_sizes).
+    font_sizes = column_font_sizes(figsize[0])
     with mpl.rc_context(PUBLICATION_RC):
         fig, ax = plt.subplots(figsize=figsize, constrained_layout=True)
-    for label, values, color, distribution, weights in distributions:
+
+    # Bin and smooth every distribution first: the drawing order is by area,
+    # so a compact distribution is never buried under a broad one.
+    styled = []
+    prepared = []
+    prior_index = 0
+    for label, values, color, distribution in distributions:
+        if distribution == "posterior":
+            linestyle = "-"
+        else:
+            linestyle = PRIOR_DASH_PATTERNS[prior_index % len(PRIOR_DASH_PATTERNS)]
+            prior_index += 1
+        styled.append((label, color, linestyle, distribution))
         histogram, xedges, yedges = np.histogram2d(
             values[:, 0], values[:, 1], bins=bins, range=plot_range,
-            weights=weights,
         )
-        smoothed = _smooth_density_2d(histogram)
+        smoothed = _smooth_density_2d(histogram, smooth)
         levels = _credible_density_levels(smoothed)
-        if levels:
-            xcenters = (xedges[:-1] + xedges[1:]) / 2
-            ycenters = (yedges[:-1] + yedges[1:]) / 2
-            ax.contour(
-                xcenters, ycenters, smoothed.T, levels=levels,
-                colors=color, linewidths=np.linspace(1.2, 2.0, len(levels)),
-                linestyles="-" if distribution == "posterior" else "--",
-            )
+        if not levels:
+            continue
+        prepared.append((
+            int((smoothed >= levels[0]).sum()), color, linestyle, smoothed,
+            xedges, yedges, levels,
+        ))
+
+    for order, (_, color, linestyle, smoothed, xedges, yedges, levels) in enumerate(
+        sorted(prepared, key=lambda item: -item[0])
+    ):
+        xcenters = (xedges[:-1] + xedges[1:]) / 2
+        ycenters = (yedges[:-1] + yedges[1:]) / 2
+        zorder = 2 + 2 * order
+        # Fill the innermost (68%) region only. Filling both bands stacks four
+        # translucent layers wherever distributions overlap and greys them out.
+        ax.contourf(
+            xcenters, ycenters, smoothed.T,
+            levels=[levels[-1], smoothed.max() * 1.001],
+            colors=[mpl.colors.to_rgba(color, CONTOUR_CORE_ALPHA)],
+            zorder=zorder,
+        )
+        ax.contour(
+            xcenters, ycenters, smoothed.T, levels=levels, colors=color,
+            linewidths=np.linspace(*CONTOUR_LINEWIDTHS, len(levels)),
+            linestyles=[linestyle] * len(levels), zorder=zorder + 1,
+        )
 
     ax.set_xlim(plot_range[0])
-    ax.set_ylim(plot_range[1])
-    ax.set_xlabel(r"$a_1$")
-    ax.set_ylabel(r"$a_2$")
-    ax.tick_params(labelsize=12)
+    # The headroom is an axes limit, not a wider binning range, so the contours
+    # are identical to the ones drawn without a legend band.
+    ylow, yhigh = plot_range[1]
+    ax.set_ylim(ylow, yhigh + legend_headroom * (yhigh - ylow))
+    ax.set_xlabel(r"$a_1$", fontsize=font_sizes["label"])
+    ax.set_ylabel(r"$a_2$", fontsize=font_sizes["label"])
+    ax.tick_params(labelsize=font_sizes["tick"])
     ax.minorticks_on()
-    ax.grid(color="#9AA4B2", alpha=.18, linewidth=.7)
+    ax.grid(color="#9AA4B2", alpha=.18, linewidth=.7, zorder=0)
+    if note:
+        ax.annotate(
+            note, xy=(1.0, 1.015),
+            xycoords="axes fraction", ha="right", va="bottom",
+            color="#596273", fontsize=font_sizes["legend"],
+        )
 
-    handles = [Line2D([], [], color=color, lw=1.6,
-                      ls="-" if distribution == "posterior" else "--",
-                      label=label)
-               for label, _, color, distribution, _ in distributions]
-    ax.legend(handles=handles, loc="best", fontsize=10.5,
-              handlelength=2.4, labelspacing=.45)
+    # Swatches carry both the fill and the line style, so the legend reads the
+    # same way the contours do.
+    handles = {"prior": [], "posterior": []}
+    for label, color, linestyle, distribution in styled:
+        handles[distribution].append(
+            Patch(facecolor=mpl.colors.to_rgba(color, CONTOUR_CORE_ALPHA + .05),
+                  edgecolor=color, linewidth=1.5, linestyle=linestyle,
+                  label=label)
+        )
+    # Priors in the left column, posteriors in the right. matplotlib fills a
+    # legend column by column, so the shorter group is padded with blank
+    # entries to keep the split exact whichever group is longer.
+    columns = [column for column in
+               (handles["prior"], handles["posterior"]) if column]
+    rows = max(len(column) for column in columns)
+    legend = ax.legend(
+        handles=[handle for column in columns
+                 for handle in column + [Line2D([], [], linestyle="none",
+                                                label="")] * (rows - len(column))],
+        ncol=len(columns), loc=legend_loc, fontsize=font_sizes["legend"],
+        handlelength=2.1,
+        handleheight=1.1, labelspacing=.7, handletextpad=.9, frameon=True,
+        framealpha=.92, edgecolor="none", facecolor="white", borderpad=.8,
+        borderaxespad=.8, columnspacing=1.8,
+    )
+    legend.set_zorder(20)
     return fig
 
 
@@ -877,19 +1059,18 @@ def plot_ma_posterior_overlay(results,
         elif names != expected_names:
             raise ValueError("Selected M_A posteriors use different parameters")
         overlays.append((key, result["spec"], samples,
-                         colors[index % len(colors)], result.get("weights")))
+                         colors[index % len(colors)]))
 
     # Standard legend text; ``labels`` (keyed by fit key) overrides entries.
     labels = dict(labels or {})
-    single_prior = len({prior_label(spec) for _, spec, _, _, _ in overlays}) == 1
+    single_prior = len({prior_label(spec) for _, spec, _, _ in overlays}) == 1
     overlays = [
-        (labels.get(key, posterior_label(spec, single_prior)), samples, color,
-         weights)
-        for key, spec, samples, color, weights in overlays
+        (labels.get(key, posterior_label(spec, single_prior)), samples, color)
+        for key, spec, samples, color in overlays
     ]
 
     n = len(expected_names)
-    joined = np.concatenate([samples for _, samples, _, _ in overlays], axis=0)
+    joined = np.concatenate([samples for _, samples, _ in overlays], axis=0)
     ranges = []
     for coordinate in range(n):
         low, high = np.quantile(joined[:, coordinate], [0.001, 0.999])
@@ -904,24 +1085,27 @@ def plot_ma_posterior_overlay(results,
             if row < col:
                 ax.set_visible(False)
                 continue
-            for label, samples, color, weights in overlays:
+            for label, samples, color in overlays:
                 if row == col:
-                    centers, density = _smooth_density(
-                        samples[:, col], bins, weights
-                    )
+                    centers, density = _smooth_density(samples[:, col], bins)
                     ax.plot(centers, density, color=color, lw=2.0)
                 else:
+                    x_range, x_bins = _panel_binning(
+                        ranges[col], samples[:, col], bins)
+                    y_range, y_bins = _panel_binning(
+                        ranges[row], samples[:, row], bins)
                     histogram, xedges, yedges = np.histogram2d(
-                        samples[:, col], samples[:, row], bins=bins,
-                        range=[ranges[col], ranges[row]], weights=weights,
+                        samples[:, col], samples[:, row],
+                        bins=[x_bins, y_bins], range=[x_range, y_range],
                     )
                     smoothed = _smooth_density_2d(histogram)
                     levels = _credible_density_levels(smoothed)
                     if levels:
-                        xcenters = (xedges[:-1] + xedges[1:]) / 2
-                        ycenters = (yedges[:-1] + yedges[1:]) / 2
+                        xgrid, ygrid, density = _density_grid_to_edges(
+                            xedges, yedges, smoothed
+                        )
                         ax.contour(
-                            xcenters, ycenters, smoothed.T, levels=levels,
+                            xgrid, ygrid, density.T, levels=levels,
                             colors=color,
                             linewidths=np.linspace(1.2, 2.0, len(levels)),
                         )
@@ -939,11 +1123,11 @@ def plot_ma_posterior_overlay(results,
             elif col > 0:
                 ax.set_yticklabels([])
             ax.tick_params(labelsize=9)
-            ax.minorticks_on()
+            _style_corner_ticks(ax, x_only=row == col)
             ax.grid(color="#9AA4B2", alpha=.15, linewidth=.6)
 
     handles = [Line2D([], [], color=color, lw=1.8, label=label)
-               for label, _, color, _ in overlays]
+               for label, _, color in overlays]
     # Lay out the corner panels without the legend. An axes-attached legend
     # outside the first diagonal panel makes tight_layout reserve a large gap
     # between every column, dramatically shrinking the plots.
@@ -978,9 +1162,6 @@ def plot_corner(result, bins=35, show_all_coefficients=False,
     best_fit_color = "#000000"
     prior_color = "#D62728"
     samples, names, indices = _diagnostic_view(result, show_all_coefficients)
-    # Normalized importance weights of the chain (spline_reweighting.py);
-    # prior draws stay unweighted.
-    weights = result.get("weights")
     if axis_names is None:
         axis_names = names
     elif len(axis_names) != len(names):
@@ -1020,7 +1201,7 @@ def plot_corner(result, bins=35, show_all_coefficients=False,
                 ax.set_visible(False)
                 continue
             if row == col:
-                centers, density = _smooth_density(samples[:, col], bins, weights)
+                centers, density = _smooth_density(samples[:, col], bins)
                 ax.plot(centers, density, color=posterior_color, lw=1.8)
                 if prior_mask[col]:
                     prior_centers, prior_density = _smooth_density(
@@ -1029,8 +1210,8 @@ def plot_corner(result, bins=35, show_all_coefficients=False,
                     ax.plot(prior_centers, prior_density, color=prior_color,
                             lw=1.2, alpha=.6)
                 ax.axvline(profile[col], color=best_fit_color, ls="--", lw=1.5)
-                q16, median, q84 = weighted_quantile(
-                    samples[:, col], weights, [.16, .50, .84]
+                q16, median, q84 = _quantile(
+                    samples[:, col], [.16, .50, .84]
                 )
                 central, minus, plus = _format_interval(
                     median, median - q16, q84 - median
@@ -1052,38 +1233,52 @@ def plot_corner(result, bins=35, show_all_coefficients=False,
                 )
                 ax.set_yticks([])
             else:
+                x_range, x_bins = _panel_binning(
+                    ranges[col], samples[:, col], bins)
+                y_range, y_bins = _panel_binning(
+                    ranges[row], samples[:, row], bins)
                 histogram, xedges, yedges = np.histogram2d(
-                    samples[:, col], samples[:, row], bins=bins, weights=weights
+                    samples[:, col], samples[:, row], bins=[x_bins, y_bins],
+                    range=[x_range, y_range],
                 )
                 histogram = _smooth_density_2d(histogram)
                 levels = _credible_density_levels(histogram)
                 if levels:
-                    xcenters = (xedges[:-1] + xedges[1:]) / 2
-                    ycenters = (yedges[:-1] + yedges[1:]) / 2
+                    xgrid, ygrid, density = _density_grid_to_edges(
+                        xedges, yedges, histogram
+                    )
+                    upper = np.nextafter(density.max(), np.inf)
                     if len(levels) == 2:
-                        upper = np.nextafter(histogram.max(), np.inf)
                         ax.contourf(
-                            xcenters, ycenters, histogram.T,
+                            xgrid, ygrid, density.T,
                             levels=[levels[0], levels[1], upper],
                             colors=[contour95_fill, contour68_fill],
                         )
                     else:
-                        upper = np.nextafter(histogram.max(), np.inf)
                         ax.contourf(
-                            xcenters, ycenters, histogram.T,
+                            xgrid, ygrid, density.T,
                             levels=[levels[0], upper], colors=[contour68_fill],
                         )
                 if prior_mask[col] and prior_mask[row]:
+                    prior_x_range, prior_x_bins = _panel_binning(
+                        ranges[col], prior_samples[:, col], bins)
+                    prior_y_range, prior_y_bins = _panel_binning(
+                        ranges[row], prior_samples[:, row], bins)
                     prior_histogram, prior_xedges, prior_yedges = np.histogram2d(
-                        prior_samples[:, col], prior_samples[:, row], bins=bins
+                        prior_samples[:, col], prior_samples[:, row],
+                        bins=[prior_x_bins, prior_y_bins],
+                        range=[prior_x_range, prior_y_range],
                     )
                     prior_histogram = _smooth_density_2d(prior_histogram)
                     prior_levels = _credible_density_levels(prior_histogram)
                     if prior_levels:
-                        prior_xcenters = (prior_xedges[:-1] + prior_xedges[1:]) / 2
-                        prior_ycenters = (prior_yedges[:-1] + prior_yedges[1:]) / 2
+                        prior_xgrid, prior_ygrid, prior_density = (
+                            _density_grid_to_edges(
+                                prior_xedges, prior_yedges, prior_histogram
+                            )
+                        )
                         ax.contour(
-                            prior_xcenters, prior_ycenters, prior_histogram.T,
+                            prior_xgrid, prior_ygrid, prior_density.T,
                             levels=prior_levels, colors=prior_color,
                             linewidths=np.linspace(.9, 1.3, len(prior_levels)),
                             linestyles=["--", "-"][-len(prior_levels):], alpha=.6,
@@ -1094,6 +1289,7 @@ def plot_corner(result, bins=35, show_all_coefficients=False,
                 ax.set_ylim(ranges[row])
 
             ax.set_xlim(ranges[col])
+            _style_corner_ticks(ax, x_only=row == col)
 
             if row == n - 1:
                 ax.set_xlabel(_parameter_label(axis_names[col]))
@@ -1209,7 +1405,6 @@ def plot_fit(result, bins=45, axis_ranges=None):
         top.hist(result["prior_samples"][:, i], edges, density=True,
                  histtype="step", color="C3", lw=1.4, label="Prior")
         top.hist(result["samples"][:, i], edges, density=True,
-                 weights=result.get("weights"),
                  histtype="stepfilled", color="C0", alpha=.4, label="Posterior")
         top.axvline(result["profile"][i], color="k", ls="--", label="Best fit")
         top.axvspan(result["q16"][i], result["q84"][i], color="C1", alpha=.18,
@@ -1263,25 +1458,14 @@ def _save_figure(fig, suite, fit, stem, output_dir, dpi, formats):
     return saved
 
 
-def _fa_curves(result, q2, use_prior=False, max_samples=20_000, seed=2026,
-               return_weights=False):
-    """Evaluate F_A for a representative subset of a fit's joint samples.
-
-    With ``return_weights=True`` the normalized importance weights of the
-    selected samples are returned as well (``(curves, weights)``); they are
-    uniform for prior draws and for dipole-M_A fits and must be used for any
-    posterior band or moment (see :mod:`spline_reweighting`).
-    """
+def _fa_curves(result, q2, use_prior=False, max_samples=20_000, seed=2026):
+    """Evaluate F_A for a representative subset of a fit's joint samples."""
     samples = result["prior_samples" if use_prior else "samples"]
-    weights = None if use_prior else result.get("weights")
-    if weights is None:
-        weights = uniform_weights(len(samples))
     if len(samples) > max_samples:
         indices = np.random.default_rng(seed).choice(
             len(samples), size=max_samples, replace=False
         )
         samples = samples[indices]
-        weights = weights[indices] / weights[indices].sum()
     if result["spec"].prior is None:
         # GENIE convention used throughout this analysis: F_A(0) < 0.
         curves = -1.2723 / (1 + q2[None, :] / samples[:, :1] ** 2) ** 2
@@ -1295,7 +1479,7 @@ def _fa_curves(result, q2, use_prior=False, max_samples=20_000, seed=2026,
             + np.sqrt(prior.t_cut_gev2 - prior.t0_gev2)
         )
         curves = samples @ np.vander(z, N=samples.shape[1], increasing=True).T
-    return (curves, weights) if return_weights else curves
+    return curves
 
 
 @mpl.rc_context(PUBLICATION_RC)
@@ -1422,10 +1606,8 @@ def plot_fa_summary(results, show=None, comparison_prior=None,
 
     for i, key in enumerate(selected):
         result = results[key]
-        curves, curve_weights = _fa_curves(
-            result, q2, max_samples=max_samples, return_weights=True
-        )
-        low, median, high = weighted_quantile(curves, curve_weights, [.16, .50, .84])
+        curves = _fa_curves(result, q2, max_samples=max_samples)
+        low, median, high = _quantile(curves, [.16, .50, .84])
         low, median, high = -high, -median, -low
         color = FA_SOURCE_COLORS.get(key, f"C{i % 10}")
         linestyle = linestyles[(i // 8) % len(linestyles)]
@@ -1535,12 +1717,6 @@ def run_suite(suite, burn_in=0, thin=1, n_prior=50_000,
         print(f'\n{spec.title}\n{result["root_file"]}')
         n_retained = len(result["samples"])
         print(f"Retained posterior samples after burn-in/thinning: {n_retained:,}")
-        if result["reweighting"] is not None:
-            print(describe_ess(result["ess"], n_retained)
-                  + f" after the spline-factorization correction "
-                  f"({result['reweighting']['grid_type']} dchi2 grid, "
-                  f"max |dchi2| at the samples "
-                  f"{result['reweighting']['max_abs_dchi2']:.3g})")
         if n_retained < 20_000:
             print("WARNING: fewer than 20,000 retained posterior samples; "
                   "also check effective sample size and convergence.")
@@ -1552,7 +1728,7 @@ def run_suite(suite, burn_in=0, thin=1, n_prior=50_000,
         diagnostic_samples, diagnostic_names, _ = _diagnostic_view(
             result, show_all_coefficients
         )
-        covariance_matrix = weighted_covariance(diagnostic_samples, result["weights"])
+        covariance_matrix = np.atleast_2d(np.cov(diagnostic_samples, rowvar=False))
         covariance = pd.DataFrame(
             covariance_matrix, index=diagnostic_names, columns=diagnostic_names,
         )

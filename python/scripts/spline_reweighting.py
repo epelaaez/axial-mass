@@ -480,28 +480,29 @@ def _fit_spec(fit_name):
     raise KeyError(f"Unknown fit {fit_name!r}; known fits: {[spec.key for spec in SPECS]}")
 
 
-def locate_chain_file(fit_name, suite):
+def locate_chain_file(fit_name, suite, data_root=None):
     """Path of the ``*_v1_PROfile.root`` file holding the MCMC chain, or ``None``.
 
-    The production the other notebooks read (``SUITE_DATA_DIRS``) is searched
-    first; fits absent there (``lqcd_k7``, ``minerva_lqcd_k7``) are looked up in
-    the newer production that carries the suite's own name, as notebook 12 does.
+    ``data_root`` overrides ``postfit_physical_parameters.DATA_ROOT``, so a
+    variant tree under ``axial_mass_crosstest/<variant>/`` can be read with the
+    same call.
     """
+    from pathlib import Path
     from postfit_physical_parameters import DATA_ROOT, SUITE_DATA_DIRS  # local import
 
     suite_key = SUITE_FIT_RESULTS[normalize_suite(suite)]
-    for production in (SUITE_DATA_DIRS.get(suite_key, suite_key), suite_key):
-        directory = DATA_ROOT / production / fit_name
-        preferred = directory / f"{fit_name}_v1_PROfile.root"
-        if preferred.is_file():
-            return preferred
-        matches = sorted(directory.glob("*_v1_PROfile.root"))
-        if len(matches) == 1:
-            return matches[0]
+    production = SUITE_DATA_DIRS.get(suite_key, suite_key)
+    directory = Path(data_root or DATA_ROOT) / production / fit_name
+    preferred = directory / f"{fit_name}_v1_PROfile.root"
+    if preferred.is_file():
+        return preferred
+    matches = sorted(directory.glob("*_v1_PROfile.root"))
+    if len(matches) == 1:
+        return matches[0]
     return None
 
 
-def load_chain(fit_name, suite, burn_in=0, thin=1):
+def load_chain(fit_name, suite, burn_in=0, thin=1, data_root=None):
     """Load the MCMC chain of one z-expansion fit.
 
     Returns ``(chain_df, eta_samples)``: the full chain as a DataFrame (one
@@ -515,7 +516,7 @@ def load_chain(fit_name, suite, burn_in=0, thin=1):
     spec = _fit_spec(fit_name)
     if spec.prior is None:
         raise ValueError(f"{fit_name!r} is a dipole-M_A fit and has no eta parameters")
-    path = locate_chain_file(fit_name, suite)
+    path = locate_chain_file(fit_name, suite, data_root)
     if path is None:
         warnings.warn(
             f"No MCMC chain found for fit={fit_name!r}, suite={normalize_suite(suite)!r}.",
@@ -538,13 +539,17 @@ def load_chain(fit_name, suite, burn_in=0, thin=1):
     return chain_df, eta_samples
 
 
-def reweight_fit(fit_name, suite, burn_in=0, thin=1, grid_type="auto", verbose=True):
+def reweight_fit(fit_name, suite, burn_in=0, thin=1, grid_type="auto", verbose=True,
+                 data_root=None):
     """Convenience wrapper: chain, grid and weights in one call.
 
     Returns a dict with ``chain_df``, ``eta_samples``, ``grid``, ``weights_raw``,
     ``weights_norm``, ``ess``, ``dchi2_samples``, or ``None`` when no chain exists.
+    ``data_root`` reads the chain from a variant tree instead of the production
+    one; the grid is unaffected, since it depends only on the prior and suite.
     """
-    chain_df, eta_samples = load_chain(fit_name, suite, burn_in=burn_in, thin=thin)
+    chain_df, eta_samples = load_chain(fit_name, suite, burn_in=burn_in, thin=thin,
+                                       data_root=data_root)
     if chain_df is None:
         return None
     grid = load_dchi2_grid(fit_name, suite, grid_type=grid_type)
