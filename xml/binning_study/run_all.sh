@@ -26,7 +26,7 @@ usage() {
 Usage: ./run_all.sh [options]
 
 Run every XML below xml/binning_study/<family>/<variant>/ (families: nuwro,
-asimov; variants: nominal, fine_q2, fine_pn, fine_both, ...). Results are
+asimov; variants: nominal, count100, count50, ...). Results are
 written to OUTPUT_ROOT/binning_study_fit_results/<family>/<variant>/<fit>/.
 
 Options:
@@ -42,7 +42,7 @@ Options:
 
 Environment:
   FAMILIES="nuwro asimov"       Same as repeated --family
-  VARIANTS="fine_q2 fine_both"  Same as repeated --variant
+  VARIANTS="count50 count10"    Same as repeated --variant
   FIT="minerva_k6 lqcd_k6"      Same as repeated --fit
   CHI2=CNP                      Same as --chi2
   OUTPUT_ROOT, PROFIT_BIN, NTHREADS, STAGES, DRY_RUN, PLOT_WITH_SPLINES,

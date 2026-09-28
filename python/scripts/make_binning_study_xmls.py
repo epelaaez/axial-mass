@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the finer-binning study XMLs from the production fit XMLs.
+"""Generate the binning-study XMLs from the production fit XMLs.
 
 Every XML in ``xml/<family>`` (``nuwro`` fake data, ``asimov`` GENIE fake data) is
 copied to ``xml/binning_study/<family>/<variant>/`` with the reconstructed
@@ -14,21 +14,23 @@ Two further changes relative to production, both confined to the study:
   already carry a ``restrict``. The 7 knots stay at -3..3; PROfit extrapolates
   the outer cubic segment, and the fit box is widened so the finer binnings,
   whose PCA2 minimum sat at the -3 edge, are not clipped.
-* Every finer variant keeps at least ``MIN_MC_EVENTS`` raw MC events in every
-  reco bin (``--check`` verifies this against the input file and fails
-  otherwise). PROfit's MC-statistics covariance takes the inverse of the
-  per-bin MC error, so an empty bin makes the covariance singular and a nearly
-  empty one is dominated by MC noise. Hence the sparsely populated edge bins
-  (lowest and highest log10(Q^2), highest p_n) are never split, and because the
-  production corner bin log10(Q^2) in [-2, -1.5] x p_n in [0, 0.1] holds only
-  5 MC events, the finer variants move the first p_n edge from 0.10 to 0.15
-  (``STUDY_PN``). The ``nominal`` variant keeps the production edges unchanged,
-  since it is the reference, and is the one variant exempt from the threshold.
+* Every variant except ``nominal`` keeps at least ``MIN_MC_EVENTS`` raw MC
+  events in every reco bin (``--check`` verifies this against the input file
+  and fails otherwise). PROfit's MC-statistics covariance takes the inverse of
+  the per-bin MC error, so an empty bin makes the covariance singular and a
+  nearly empty one is dominated by MC noise. The ``nominal`` variant keeps the
+  production edges unchanged, since it is the reference, and is the one variant
+  exempt from the threshold (its corner bin log10(Q^2) in [-2, -1.5] x p_n in
+  [0, 0.1] holds only 5 MC events).
 
-Use ``python/notebooks/15_binning_occupancy.ipynb`` to look at the occupancy of
-any candidate binning before adding it to ``VARIANTS``. Count-based variants grown
-by ``python/notebooks/17_count_based_binning.ipynb`` are read from
-``xml/binning_study/count_variants.json`` and merged into ``VARIANTS``.
+The study variants are the count-based grids grown by
+``python/notebooks/17_count_based_binning.ipynb``, read from
+``xml/binning_study/count_variants.json`` and merged into ``VARIANTS`` next to
+``nominal``. The hand-drawn ``fine_q2``/``fine_pn``/``fine_both`` refinements
+were dropped on 2026-09-28: their sparsest bins made the event-matched DetVar
+ratios blow up (see the DetVar notes). Use
+``python/notebooks/15_binning_occupancy.ipynb`` to look at the occupancy of any
+candidate binning before adding it.
 
 Usage:
     python/scripts/make_binning_study_xmls.py            # write all families and variants
@@ -58,8 +60,6 @@ AXIAL_SPLINE_PATTERN = re.compile(r"weight_spline_FAzexp\w*|MaCCQE_UBGenie")
 
 NOMINAL_Q2 = [-2.00, -1.50, -1.20, -1.00, -0.85, -0.70, -0.55, -0.40, -0.20, 0.20]
 NOMINAL_PN = [0.00, 0.10, 0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 1.00]
-# Baseline p_n axis of the finer variants: first edge moved 0.10 -> 0.15 (see module docstring).
-STUDY_PN = [0.00, 0.15, 0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 1.00]
 
 # Minimum raw MC events per reco bin for every variant except ``nominal``.
 MIN_MC_EVENTS = 10
@@ -71,48 +71,12 @@ INPUT_FILE = "/nevis/riverside/data/epelaez/ngem/intermediate_files/minimal_with
 MC_SELECTION = "isdata==0 && isext==0 && isdirt==0 && isnuwro==0 && afro_1mu1p_sel==1"
 
 
-def halve(edges, keep=()):
-    """Split every bin in two, except the bins whose index is listed in ``keep``.
-
-    Negative indices count from the last bin, as for Python sequences.
-    """
-    nbins = len(edges) - 1
-    keep = {index % nbins for index in keep}
-    out = []
-    for index, (lo, hi) in enumerate(zip(edges[:-1], edges[1:])):
-        out.append(lo)
-        if index not in keep:
-            out.append(0.5 * (lo + hi))
-    out.append(edges[-1])
-    return out
-
-
 # name -> (log10(Q^2) edges, p_n edges, description)
 VARIANTS = {
     "nominal": (
         NOMINAL_Q2,
         NOMINAL_PN,
         "production binning (9 x 8 = 72 bins), rerun here as the in-study reference",
-    ),
-    "fine_q2": (
-        halve(NOMINAL_Q2, keep=(0, -1)),
-        STUDY_PN,
-        "log10(Q^2) bins halved except the first and last; first p_n edge at 0.15 (16 x 8 = 128 bins)",
-    ),
-    "fine_pn": (
-        NOMINAL_Q2,
-        halve(STUDY_PN, keep=(0, 1, -1)),
-        "p_n bins halved except [0, 0.15], [0.15, 0.20] and [0.7, 1.0] (9 x 13 = 117 bins)",
-    ),
-    "fine_both": (
-        halve(NOMINAL_Q2, keep=(0, -1)),
-        halve(STUDY_PN, keep=(0, 1, -1)),
-        "both axes refined as above (16 x 13 = 208 bins)",
-    ),
-    "fine_both_14": (
-        halve(NOMINAL_Q2, keep=(0, -1)),
-        [0.00, 0.15, 0.175, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 1.00],
-        "fine_both with the [0.15, 0.20] p_n bin split; the finest regular refinement (16 x 14 = 224 bins)",
     ),
 }
 

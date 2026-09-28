@@ -62,7 +62,8 @@ python/scripts/make_binning_study_xmls.py --family asimov --fit minerva_k6
 ```
 
 Rerun the generator whenever the production XMLs change. The variants are
-defined in `VARIANTS` inside the generator.
+`nominal` plus the count-based grids in `binning_study/count_variants.json`,
+merged into `VARIANTS` inside the generator.
 
 Use `python/notebooks/15_binning_occupancy.ipynb` to inspect the MC occupancy
 of the variants or of any candidate edges before adding them to `VARIANTS`.
@@ -79,7 +80,7 @@ Run the study with the dedicated runner, which mirrors `run_all.sh`:
 
 ```bash
 MCMC_ITERATIONS=500000 binning_study/run_all.sh                   # every family, variant and fit
-binning_study/run_all.sh --family asimov --variant fine_both --fit minerva_k6
+binning_study/run_all.sh --family asimov --variant count50 --fit minerva_k6
 FAMILIES=nuwro FIT="minerva_k6 lqcd_k6" CHI2=CNP binning_study/run_all.sh
 ```
 
