@@ -64,7 +64,6 @@
 </MCFile>
 
 <!-- Weighted mixture of the preliminary Run 4b and Run 5 detector variations. -->
-<!--
 <DetVarFiles>
 	<DetVarSection treename="tree" include_only_weights="1" extra_weight="net_weight" cv_variation_matching_vars="detvar_sample,run,subrun,event">
 
@@ -85,7 +84,6 @@
 
 	</DetVarSection>
 </DetVarFiles>
--->
 
 <systematics>
 
@@ -93,7 +91,6 @@
 	<systematic type="mcstat" plotname="MC Stats" tag="other">MCStat</systematic>
 
 	<!-- Detector variation systematics -->
-<!--
 	<systematic name="Recomb2" type="spline_to_covariance" plotname="Recomb2" tag="DetVar" />
 	<systematic name="LYAtt" type="spline_to_covariance" plotname="LYAtt" tag="DetVar" />
 	<systematic name="LYDown" type="spline_to_covariance" plotname="LYDown" tag="DetVar" />
@@ -103,7 +100,6 @@
 	<systematic name="WireModYZ" type="spline_to_covariance" plotname="WireModYZ" tag="DetVar" />
 	<systematic name="WireModThetaXZ" type="spline_to_covariance" plotname="WireModThetaXZ" tag="DetVar" />
 	<systematic name="WireModThetaYZ" type="spline_to_covariance" plotname="WireModThetaYZ" tag="DetVar" />
--->
 
     <!-- Cross Section Systematics, 55 splines -->
 

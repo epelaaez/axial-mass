@@ -26,11 +26,8 @@ Two further changes relative to production, both confined to the study:
 The study variants are the count-based grids grown by
 ``python/notebooks/17_count_based_binning.ipynb``, read from
 ``xml/binning_study/count_variants.json`` and merged into ``VARIANTS`` next to
-``nominal``. The hand-drawn ``fine_q2``/``fine_pn``/``fine_both`` refinements
-were dropped on 2026-09-28: their sparsest bins made the event-matched DetVar
-ratios blow up (see the DetVar notes). Use
-``python/notebooks/15_binning_occupancy.ipynb`` to look at the occupancy of any
-candidate binning before adding it.
+``nominal``. Use ``python/notebooks/15_binning_occupancy.ipynb`` to look at 
+the occupancy of any candidate binning before adding it.
 
 Usage:
     python/scripts/make_binning_study_xmls.py            # write all families and variants
