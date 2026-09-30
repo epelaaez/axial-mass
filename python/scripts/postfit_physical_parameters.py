@@ -1360,10 +1360,18 @@ def plot_ma_nuisance_corner(result, bins=35, show_prior=False,
     )
 
 
-def plot_zexp_nuisance_corner(result, bins=35, show_prior=False, axis_ranges=None):
-    """Joint posterior of physical z coefficients and fitted nuisances."""
+def plot_zexp_nuisance_corner(result, bins=35, show_prior=False,
+                              show_zexp_prior=True, axis_ranges=None):
+    """Joint posterior of physical z coefficients and fitted nuisances.
+
+    ``show_zexp_prior=False`` suppresses the prior overlay on the z-expansion
+    coefficients while keeping it on the nuisance parameters; use this for
+    uniform-prior fits, whose synthetic ``prior_samples`` only exist to set
+    axis ranges and do not represent a prior that entered the fit.
+    """
     joint = dict(result)
     n = len(result["zexp_nuisance_names"])
+    n_axial = len(result["joint_names"])
     joint.update(
         samples=result["zexp_nuisance_samples"],
         prior_samples=result["zexp_nuisance_prior_samples"],
@@ -1381,6 +1389,7 @@ def plot_zexp_nuisance_corner(result, bins=35, show_prior=False, axis_ranges=Non
     ]
     return plot_corner(
         joint, bins=bins, show_prior=show_prior, axis_names=axis_names,
+        prior_mask=[show_zexp_prior] * n_axial + [True] * (n - n_axial),
         axis_ranges=axis_ranges,
     )
 
@@ -1781,6 +1790,7 @@ def run_suite(suite, burn_in=0, thin=1, n_prior=50_000,
         elif spec.nuisance_branches:
             nuisance_figure = plot_zexp_nuisance_corner(
                 result, show_prior=show_prior_in_corner,
+                show_zexp_prior=not spec.uniform_prior,
                 axis_ranges=axis_ranges,
             )
             if save_figures:
