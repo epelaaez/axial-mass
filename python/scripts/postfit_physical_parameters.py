@@ -117,7 +117,6 @@ FA_SOURCE_COLORS = {
     "minerva_lqcd_k6": "#CC79A7",
     "minerva_lqcd_k7": "#A85F8C",
     "ma": "#0072B2",
-    "ma_no_axff": "#0072B2",
 }
 
 # Contour style for plot_distribution_overlay. Each prior gets its own broken
@@ -188,21 +187,44 @@ class FitSpec:
     variant: str = ""
 
 
+# Modeling knobs floated as nuisance parameters, as PROfit labels them (plotname) and as
+# the chain branches are named. Display names and prior ranges for the corner plots below.
+NUISANCE_LABELS = ("RPA_CCQE", "XSecShape_CCMEC", "MFP_N", "DecayAngMEC", "FrCEx_N")
+NUISANCE_BRANCHES = ("RPA_CCQE_UBGenie", "XSecShape_CCMEC_UBGenie", "MFP_N_UBGenie",
+                           "DecayAngMEC_UBGenie", "FrCEx_N_UBGenie")
+NUISANCE_DISPLAY_NAMES = {
+    "AxFFCCQEshape": "AxFFCCQEshape pull",
+    "NormCCMEC": "NormCCMEC pull",
+    "RPA_CCQE": "RPA CCQE pull",
+    "XSecShape_CCMEC": "XSecShape CCMEC pull",
+    "MFP_N": "MFP N pull",
+    "DecayAngMEC": "DecayAngMEC pull",
+    "FrCEx_N": "FrCEx N pull",
+}
+# Ranges the truncated standard-normal prior is drawn over: the two-point model switches
+# (AxFFCCQEshape, XSecShape_CCMEC, DecayAngMEC) are restricted to [0, 1] in the XMLs.
+NUISANCE_PRIOR_RANGES = {
+    "AxFFCCQEshape": (0, 1),
+    "NormCCMEC": (-2, 3),
+    "RPA_CCQE": (-3, 3),
+    "XSecShape_CCMEC": (0, 1),
+    "MFP_N": (-3, 3),
+    "DecayAngMEC": (0, 1),
+    "FrCEx_N": (-3, 3),
+}
+
 SPECS = (
+    # The M_A fits and the *_nuisance fits float the same five modeling knobs (since 2026-10-03,
+    # chosen by the injection study in 19_modeling_knob_screen.ipynb): RPA_CCQE, XSecShape_CCMEC,
+    # MFP_N, DecayAngMEC, FrCEx_N. The dipole fit no longer floats AxFFCCQEshape (the former
+    # "ma_no_axff" is now "ma"), so the two M_A fits differ only in the M_A prior.
     FitSpec("ma", r"Dipole $M_A$", source=r"Gaussian $M_A$",
-            profile_labels=("MACCQE", "AxFFCCQEshape", "NormCCMEC", "RPA_CCQE"),
-            chain_branches=("MaCCQE_UBGenie", "AxFFCCQEshape_UBGenie",
-                            "NormCCMEC_UBGenie", "RPA_CCQE_UBGenie")),
-    FitSpec("ma_no_axff", r"Dipole $M_A$ without AxFFCCQEshape",
-            source=r"Gaussian $M_A$", variant="without AxFFCCQEshape",
-            profile_labels=("MACCQE", "NormCCMEC", "RPA_CCQE"),
-            chain_branches=("MaCCQE_UBGenie", "NormCCMEC_UBGenie",
-                            "RPA_CCQE_UBGenie")),
+            profile_labels=("MACCQE",) + NUISANCE_LABELS,
+            chain_branches=("MaCCQE_UBGenie",) + NUISANCE_BRANCHES),
     FitSpec("ma_uniform", r"Dipole $M_A$ without an $M_A$ pull penalty",
             source=r"uniform $M_A$",
-            profile_labels=("MACCQE", "NormCCMEC", "RPA_CCQE"),
-            chain_branches=("MaCCQE_UBGenie", "NormCCMEC_UBGenie",
-                            "RPA_CCQE_UBGenie"),
+            profile_labels=("MACCQE",) + NUISANCE_LABELS,
+            chain_branches=("MaCCQE_UBGenie",) + NUISANCE_BRANCHES,
             uniform_prior=True),
     FitSpec("lqcd_k6", r"LQCD (2026), $k_{\max}=6$", LQCD_K6_PRIOR,
             source="LQCD (2026)"),
@@ -211,8 +233,8 @@ SPECS = (
         r"LQCD (2026), $k_{\max}=6$, fitted nuisances",
         LQCD_K6_PRIOR,
         source="LQCD (2026)", variant="fitted nuisances",
-        nuisance_labels=("NormCCMEC", "RPA_CCQE"),
-        nuisance_branches=("NormCCMEC_UBGenie", "RPA_CCQE_UBGenie"),
+        nuisance_labels=NUISANCE_LABELS,
+        nuisance_branches=NUISANCE_BRANCHES,
     ),
     FitSpec("lqcd_k7", r"LQCD (2026), $k_{\max}=7$", LQCD_K7_PRIOR,
             source="LQCD (2026)"),
@@ -223,8 +245,8 @@ SPECS = (
         r"MINERvA (2026), $k_{\max}=6$, fitted nuisances",
         MINERVA_K6_PRIOR,
         source="MINERvA (2026)", variant="fitted nuisances",
-        nuisance_labels=("NormCCMEC", "RPA_CCQE"),
-        nuisance_branches=("NormCCMEC_UBGenie", "RPA_CCQE_UBGenie"),
+        nuisance_labels=NUISANCE_LABELS,
+        nuisance_branches=NUISANCE_BRANCHES,
     ),
     FitSpec("minerva_k6_uniform",
             r"$k_{\max}=6$ uniform prior",
@@ -234,8 +256,8 @@ SPECS = (
         r"$k_{\max}=6$ uniform prior, fitted nuisances",
         MINERVA_K6_PRIOR, uniform_prior=True,
         source="uniform", variant="fitted nuisances",
-        nuisance_labels=("NormCCMEC", "RPA_CCQE"),
-        nuisance_branches=("NormCCMEC_UBGenie", "RPA_CCQE_UBGenie"),
+        nuisance_labels=NUISANCE_LABELS,
+        nuisance_branches=NUISANCE_BRANCHES,
     ),
     FitSpec("minerva_k7", r"MINERvA (2026), $k_{\max}=7$", MINERVA_K7_PRIOR,
             source="MINERvA (2026)"),
@@ -250,8 +272,8 @@ SPECS = (
         r"MINERvA + LQCD (2026), $k_{\max}=6$, fitted nuisances",
         MINERVA_LQCD_K6_PRIOR,
         source="MINERvA + LQCD (2026)", variant="fitted nuisances",
-        nuisance_labels=("NormCCMEC", "RPA_CCQE"),
-        nuisance_branches=("NormCCMEC_UBGenie", "RPA_CCQE_UBGenie"),
+        nuisance_labels=NUISANCE_LABELS,
+        nuisance_branches=NUISANCE_BRANCHES,
     ),
 )
 
@@ -413,16 +435,8 @@ def load_fit(spec, suite, burn_in=0, thin=1, n_prior=50_000, seed=2026,
                        else rng.normal(size=(n_prior, 1)))
         prior_samples = central + sigma * prior_pulls
         names = ["M_A [GeV]"]
-        nuisance_names = {
-            "AxFFCCQEshape": "AxFFCCQEshape pull",
-            "NormCCMEC": "NormCCMEC pull",
-            "RPA_CCQE": "RPA CCQE pull",
-        }
-        nuisance_prior_ranges = {
-            "AxFFCCQEshape": (0, 1),
-            "NormCCMEC": (-2, 3),
-            "RPA_CCQE": (-3, 3),
-        }
+        nuisance_names = NUISANCE_DISPLAY_NAMES
+        nuisance_prior_ranges = NUISANCE_PRIOR_RANGES
         nuisance_labels = spec.profile_labels[1:]
         ma_joint_names = ["M_A [GeV]"] + [
             nuisance_names[label] for label in nuisance_labels
@@ -509,14 +523,8 @@ def load_fit(spec, suite, burn_in=0, thin=1, n_prior=50_000, seed=2026,
             ma_joint_names=ma_joint_names,
         )
     elif spec.nuisance_branches:
-        nuisance_names = {
-            "NormCCMEC": "NormCCMEC pull",
-            "RPA_CCQE": "RPA CCQE pull",
-        }
-        nuisance_prior_ranges = {
-            "NormCCMEC": (-2, 3),
-            "RPA_CCQE": (-3, 3),
-        }
+        nuisance_names = NUISANCE_DISPLAY_NAMES
+        nuisance_prior_ranges = NUISANCE_PRIOR_RANGES
         rng = np.random.default_rng(seed)
         result.update(
             zexp_nuisance_samples=np.column_stack(
@@ -1027,7 +1035,7 @@ def plot_distribution_overlay(results, selections, bins=55,
 
 @mpl.rc_context(PUBLICATION_RC)
 def plot_ma_posterior_overlay(results,
-                              fit_keys=("ma_no_axff", "ma_uniform"),
+                              fit_keys=("ma", "ma_uniform"),
                               labels=None, bins=45, figsize=(7.2, 7.2)):
     """Compare M_A, NormCCMEC, and RPA posteriors from compatible fits.
 

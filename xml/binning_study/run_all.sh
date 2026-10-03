@@ -20,6 +20,7 @@ family_name="${FAMILIES:-}"
 chi2="${CHI2:-}"
 mcmc_iterations="${MCMC_ITERATIONS:-}"
 mcmc_burnin="${MCMC_BURNIN:-}"
+max_jobs="${JOBS:-4}"
 
 usage() {
     cat <<'USAGE'
@@ -28,6 +29,8 @@ Usage: ./run_all.sh [options]
 Run every XML below xml/binning_study/<family>/<variant>/ (families: nuwro,
 asimov; variants: nominal, count100, count50, ...). Results are
 written to OUTPUT_ROOT/binning_study_fit_results/<family>/<variant>/<fit>/.
+Different XMLs run in parallel, JOBS at a time; each XML runs its stages
+in sequence so the binaries processed by the first stage are reused.
 
 Options:
   --family NAME                Run only this XML family (repeatable)
@@ -41,6 +44,7 @@ Options:
   -h, --help                   Show this help
 
 Environment:
+  JOBS=4                        XMLs fitted at the same time (each runs its stages in sequence)
   FAMILIES="nuwro asimov"       Same as repeated --family
   VARIANTS="count50 count10"    Same as repeated --variant
   FIT="minerva_k6 lqcd_k6"      Same as repeated --fit
@@ -263,87 +267,85 @@ fi
 
 mkdir -p "${study_output}"
 
-for family in "${families[@]}"; do
-  family_output="${study_output}/${family}${chi2_suffix}"
-  echo "==> ${family}${chi2_suffix}"
-  for variant in "${variants[@]}"; do
-    variant_dir="${script_dir}/${family}/${variant}"
-    [[ -d "${variant_dir}" ]] || continue
-    variant_output="${family_output}/${variant}"
-    mkdir -p "${variant_output}"
-
-    shopt -s nullglob
-    variant_xmls=("${variant_dir}"/*.xml)
-    shopt -u nullglob
-
-    echo "  -> ${variant}"
-    for xml in "${variant_xmls[@]}"; do
-        fit="$(basename -- "${xml}" .xml)"
-        if ((${#requested_fits[@]})); then
-            selected=0
-            for requested_fit in "${requested_fits[@]}"; do
-                if [[ "${fit}" == "${requested_fit}" ]]; then
-                    selected=1
-                    break
-                fi
-            done
-            [[ "${selected}" == "1" ]] || continue
+run_profit_stage() {
+    # run_profit_stage <fit_output> <xml> <fit> <stage>
+    local fit_output="$1" xml="$2" fit="$3" stage="$4"
+    local global_stage_args=("${chi2_args[@]}")
+    local subcommand_args=()
+    if [[ "${stage}" == "plot" && "${plot_with_splines}" == "1" ]]; then
+        subcommand_args+=(--with-splines)
+    fi
+    # Off by default here: the covariance PDFs dominate the plot stage at
+    # a few hundred bins and are not needed to compare fits. PLOT_WITH_COVAR=1
+    # restores them (needed by 12_spline_factorization_validation.ipynb).
+    if [[ "${stage}" == "plot" && "${plot_with_covar}" == "1" ]]; then
+        subcommand_args+=(--with-covar)
+    fi
+    if [[ "${stage}" == "profile" ]]; then
+        if [[ -n "${mcmc_iterations}" ]]; then
+            global_stage_args+=(--fit-options MCMC-Iterations "${mcmc_iterations}")
         fi
-        fit_output="${variant_output}/${fit}"
-        mkdir -p "${fit_output}"
+        if [[ -n "${mcmc_burnin}" ]]; then
+            global_stage_args+=(--fit-options MCMC-Burnin "${mcmc_burnin}")
+        fi
+    fi
+    local cmd=("${profit_bin}" --xml "${xml}" --tag "${fit}" --output v1 --nthread "${nthreads}"
+               --log "${stage}.log" "${global_stage_args[@]}" "${stage}" "${subcommand_args[@]}")
+    if [[ "${dry_run}" == "1" ]]; then
+        printf '        (cd %q &&' "${fit_output}"
+        printf ' %q' "${cmd[@]}"
+        printf ')\n'
+        return 0
+    fi
+    # PROfit logs to --log; ROOT chatter and any crash output go to <stage>.out
+    (cd "${fit_output}" && "${cmd[@]}" > "${stage}.out" 2>&1)
+}
 
-        echo "    ${fit}"
-        for stage in "${stage_list[@]}"; do
-            echo "        ${stage}"
-            global_stage_args=("${chi2_args[@]}")
-            subcommand_args=()
-            if [[ "${stage}" == "plot" && "${plot_with_splines}" == "1" ]]; then
-                subcommand_args+=(--with-splines)
-            fi
-            # Off by default here: the covariance PDFs dominate the plot stage at
-            # a few hundred bins and are not needed to compare fits. PLOT_WITH_COVAR=1
-            # restores them (needed by 12_spline_factorization_validation.ipynb).
-            if [[ "${stage}" == "plot" && "${plot_with_covar}" == "1" ]]; then
-                subcommand_args+=(--with-covar)
-            fi
-            if [[ "${stage}" == "profile" ]]; then
-                if [[ -n "${mcmc_iterations}" ]]; then
-                    global_stage_args+=(--fit-options MCMC-Iterations "${mcmc_iterations}")
-                fi
-                if [[ -n "${mcmc_burnin}" ]]; then
-                    global_stage_args+=(--fit-options MCMC-Burnin "${mcmc_burnin}")
-                fi
-            fi
+run_fit() {
+    # All stages of one XML, serially, in its own output directory.
+    local family="$1" variant="$2" xml="$3"
+    local fit stage
+    fit="$(basename -- "${xml}" .xml)"
+    local fit_output="${study_output}/${family}${chi2_suffix}/${variant}/${fit}"
+    [[ "${dry_run}" == "1" ]] || mkdir -p "${fit_output}"
+    for stage in "${stage_list[@]}"; do
+        run_profit_stage "${fit_output}" "${xml}" "${fit}" "${stage}" || return 1
+    done
+    [[ "${dry_run}" == "1" ]] || echo "done   ${family}${chi2_suffix}/${variant}/${fit}"
+    return 0
+}
 
-            if [[ "${dry_run}" == "1" ]]; then
-                printf '        (cd %q && %q --xml %q --tag %q --output v1 --nthread %q --log %q --progress' \
-                    "${fit_output}" "${profit_bin}" "${xml}" "${fit}" "${nthreads}" \
-                    "${stage}.log"
-                if ((${#global_stage_args[@]})); then
-                    printf ' %q' "${global_stage_args[@]}"
-                fi
-                printf ' %q' "${stage}"
-                if ((${#subcommand_args[@]})); then
-                    printf ' %q' "${subcommand_args[@]}"
-                fi
-                printf ')\n'
-                continue
-            fi
-
-            (
-                cd "${fit_output}"
-                "${profit_bin}" \
-                    --xml "${xml}" \
-                    --tag "${fit}" \
-                    --output v1 \
-                    --nthread "${nthreads}" \
-                    --log "${stage}.log" \
-                    --progress \
-                    "${global_stage_args[@]}" \
-                    "${stage}" \
-                    "${subcommand_args[@]}"
-            )
+# One job per XML (all its stages in sequence), JOBS XMLs at a time.
+jobs_list=()
+for family in "${families[@]}"; do
+    for variant in "${variants[@]}"; do
+        [[ -d "${script_dir}/${family}/${variant}" ]] || continue
+        for xml in "${xml_files[@]}"; do
+            [[ "${xml}" == "${script_dir}/${family}/${variant}/"* ]] || continue
+            jobs_list+=("${family} ${variant} ${xml}")
         done
     done
-  done
 done
+
+echo "==> ${#jobs_list[@]} XMLs, ${max_jobs} at a time, ${nthreads} threads each, stages: ${stages} -> ${study_output}"
+[[ "${dry_run}" == "1" ]] && max_jobs=1
+
+# Each job records its own failure: wait -n reaps jobs, so their statuses cannot be collected later.
+failures="$(mktemp)"
+trap 'rm -f "${failures}"' EXIT
+for job in "${jobs_list[@]}"; do
+    read -r family variant xml <<< "${job}"
+    while (($(jobs -rp | wc -l) >= max_jobs)); do
+        wait -n || true
+    done
+    [[ "${dry_run}" == "1" ]] || echo "start  ${family}${chi2_suffix}/${variant}/$(basename -- "${xml}" .xml)"
+    { run_fit "${family}" "${variant}" "${xml}" || echo "${family}${chi2_suffix}/${variant}/$(basename -- "${xml}" .xml)" >> "${failures}"; } &
+done
+wait
+mapfile -t failed < "${failures}"
+
+if ((${#failed[@]})); then
+    echo "Failed (see the logs in their output directories):" >&2
+    printf '  %s\n' "${failed[@]}" >&2
+    exit 1
+fi

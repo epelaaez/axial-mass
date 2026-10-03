@@ -101,23 +101,33 @@
 	<systematic name="WireModThetaXZ" type="spline_to_covariance" plotname="WireModThetaXZ" tag="DetVar" />
 	<systematic name="WireModThetaYZ" type="spline_to_covariance" plotname="WireModThetaYZ" tag="DetVar" />
 
-    <!-- Cross Section Systematics, 55 splines -->
+    <!-- Cross Section Systematics, 55 splines.
+         Floated nuisance knobs (type="spline"): RPA_CCQE, XSecShape_CCMEC, MFP_N, DecayAngMEC, FrCEx_N, the five
+         knobs whose 1 sigma mis-modelling biases F_A by more than 0.2 delta_F in the injection study
+         (19_modeling_knob_screen.ipynb, Section 8, 2026-10-03); every other modeling knob is a covariance term.
+         The two-point model switches are restricted to [0, 1] (0 = tune, 1 = alternative model), like
+         AxFFCCQEshape; NormCCMEC (bias 0.02 delta_F) went back into the covariance. -->
 
 	<!-- <systematic type="spline" binning="var0" plotname="MACCQE" tag="QE" force_0_cv="true" include_only_weights="1,2">MaCCQE_UBGenie</systematic>
-	<systematic type="spline_to_covariance" binning="var0" plotname="AxFFCCQEshape" knobvals="0, 1" tag="QE" force_0_cv="true" include_only_weights="1,2">AxFFCCQEshape_UBGenie</systematic> -->
+	<systematic type="spline_to_covariance" binning="var0" plotname="AxFFCCQEshape" knobvals="1, 0" tag="QE" force_0_cv="true" include_only_weights="1,2">AxFFCCQEshape_UBGenie</systematic> -->
 
 	<systematic type="spline" binning="var0" plotname="FAzexpMinervaK6PCA1" knobvals="-3, -2, -1, 0, 1, 2, 3" tag="QE" force_0_cv="true" include_only_weights="1,2" restrict="-4, 4">weight_spline_FAzexpMinervaK6PCA1</systematic>
 	<systematic type="spline" binning="var0" plotname="FAzexpMinervaK6PCA2" knobvals="-3, -2, -1, 0, 1, 2, 3" tag="QE" force_0_cv="true" include_only_weights="1,2" restrict="-4, 4">weight_spline_FAzexpMinervaK6PCA2</systematic>
 	<systematic type="spline_cross_quad" binning="var0" plotname="FAzexpMinervaK6CROSS" tag="QE" force_0_cv="true" include_only_weights="1,2" splines="weight_spline_FAzexpMinervaK6PCA1, weight_spline_FAzexpMinervaK6PCA2">weight_spline_FAzexpMinervaK6CROSS</systematic>
 	
-	<systematic type="spline_to_covariance" binning="var0" plotname="VecFFCCQEshape" knobvals="0, 1" tag="QE" force_0_cv="true" include_only_weights="1,2">VecFFCCQEshape_UBGenie</systematic>
-	<systematic type="spline" binning="var0" plotname="RPA_CCQE" tag="QE" force_0_cv="true" include_only_weights="1,2">RPA_CCQE_UBGenie</systematic>
+	<!-- generated as GENIE minmax with min=0, max=1, tuned CV=0 (BBBA05 FF): universe 0 = max = variation, universe 1 = min = CV, hence knobvals "1, 0" -->
+	<systematic type="spline_to_covariance" binning="var0" plotname="VecFFCCQEshape" knobvals="1, 0" tag="QE" force_0_cv="true" include_only_weights="1,2">VecFFCCQEshape_UBGenie</systematic>
+	<!-- RPA_CCQE_UBGenie: the stored 7-point vector equals the tuned CV at index +0.6225, not at index 0
+	     (notebook 20_rpa_knob_grid_offset); these knobvals put the tune at knob 0 and keep one grid step = 1 sigma. -->
+	<systematic type="spline" binning="var0" plotname="RPA_CCQE" knobvals="-3.6225, -2.6225, -1.6225, -0.6225, 0.3775, 1.3775, 2.3775" tag="QE" force_0_cv="true" include_only_weights="1,2">RPA_CCQE_UBGenie</systematic>
 	<systematic type="spline_to_covariance" binning="var0" plotname="CoulombCCQE" tag="QE" force_0_cv="true" include_only_weights="1,2">CoulombCCQE_UBGenie</systematic>
 
-	<systematic type="spline" binning="var0" plotname="NormCCMEC" knobvals="-2, -1, 0, 1, 2, 3" tag="MEC" force_0_cv="true" include_only_weights="1,2">NormCCMEC_UBGenie</systematic>
+	<systematic type="spline_to_covariance" binning="var0" plotname="NormCCMEC" knobvals="-2, -1, 0, 1, 2, 3" tag="MEC" force_0_cv="true" include_only_weights="1,2">NormCCMEC_UBGenie</systematic>
 	<systematic type="spline_to_covariance" binning="var0" plotname="NormNCMEC" knobvals="-1, 0, 1, 2, 3" tag="MEC" force_0_cv="true" include_only_weights="1,2">NormNCMEC_UBGenie</systematic>
-	<systematic type="spline_to_covariance" binning="var0" plotname="XSecShape_CCMEC" knobvals="0, 1" tag="MEC" force_0_cv="true" include_only_weights="1,2">XSecShape_CCMEC_UBGenie</systematic>
-	<systematic type="spline_to_covariance" binning="var0" plotname="DecayAngMEC" knobvals="0, 1" tag="MEC" force_0_cv="true" include_only_weights="1,2">DecayAngMEC_UBGenie</systematic>
+	<!-- generated as GENIE minmax with min=0, max=1, tuned CV=1 (GENIE empirical MEC shape): universe 0 = max = CV, universe 1 = min = Nieves variation, so knobvals "0, 1" is already correct -->
+	<systematic type="spline" binning="var0" plotname="XSecShape_CCMEC" knobvals="0, 1" tag="MEC" force_0_cv="true" include_only_weights="1,2" restrict="0, 1">XSecShape_CCMEC_UBGenie</systematic>
+	<!-- generated as GENIE minmax with min=0, max=1, tuned CV=0 (isotropic): universe 0 = max = variation, universe 1 = min = CV, hence knobvals "1, 0" -->
+	<systematic type="spline" binning="var0" plotname="DecayAngMEC" knobvals="1, 0" tag="MEC" force_0_cv="true" include_only_weights="1,2" restrict="0, 1">DecayAngMEC_UBGenie</systematic>
 	<systematic type="spline_to_covariance" binning="var0" plotname="FracPN_CCMEC" tag="MEC" force_0_cv="true" include_only_weights="1,2">FracPN_CCMEC_UBGenie</systematic>
 	<systematic type="spline_to_covariance" binning="var0" plotname="FracDelta_CCMEC" tag="MEC" force_0_cv="true" include_only_weights="1,2">FracDelta_CCMEC_UBGenie</systematic>
 
@@ -126,8 +136,10 @@
 	<systematic type="spline_to_covariance" binning="var0" plotname="MaNCRES" tag="RES" force_0_cv="true" include_only_weights="1,2">MaNCRES_UBGenie</systematic>
 	<systematic type="spline_to_covariance" binning="var0" plotname="MvNCRES" tag="RES" force_0_cv="true" include_only_weights="1,2">MvNCRES_UBGenie</systematic>
 	<systematic type="spline_to_covariance" binning="var0" plotname="RDecBR1eta" tag="RES" force_0_cv="true" include_only_weights="1,2">RDecBR1eta_UBGenie</systematic>
-	<systematic type="spline_to_covariance" binning="var0" plotname="Theta_Delta2Npi" knobvals="0, 1" tag="RES" force_0_cv="true" include_only_weights="1,2">Theta_Delta2Npi_UBGenie</systematic>
+	<!-- generated as GENIE minmax with min=0, max=1, tuned CV=0 (isotropic): universe 0 = max = variation, universe 1 = min = CV, hence knobvals "1, 0" -->
+	<systematic type="spline_to_covariance" binning="var0" plotname="Theta_Delta2Npi" knobvals="1, 0" tag="RES" force_0_cv="true" include_only_weights="1,2">Theta_Delta2Npi_UBGenie</systematic>
 	<systematic type="spline_to_covariance" binning="var0" plotname="RDecBR1gamma" tag="RES" force_0_cv="true" include_only_weights="1,2">RDecBR1gamma_UBGenie</systematic>
+	<!-- generated as GENIE minmax with min=0, max=1, CV=0, but the production fcl misspelled the knob ("ThetaDelta2Rad"), so both universes equal the CV and this has no effect until resimulated -->
 	<systematic type="spline_to_covariance" binning="var0" plotname="ThetaDelta2NRad" knobvals="0, 1" tag="RES" force_0_cv="true" include_only_weights="1,2">ThetaDelta2NRad_UBGenie</systematic>
 
 	<systematic type="spline_to_covariance" binning="var0" plotname="NormCCCOH" knobvals="-1, 0, 1, 2, 3" tag="COH" force_0_cv="true" include_only_weights="1,2">NormCCCOH_UBGenie</systematic>
@@ -165,8 +177,8 @@
 	<systematic type="spline_to_covariance" binning="var0" plotname="FrCEx_pi" tag="FSI" force_0_cv="true" include_only_weights="1,2">FrCEx_pi_UBGenie</systematic>
 	<systematic type="spline_to_covariance" binning="var0" plotname="FrInel_pi" tag="FSI" force_0_cv="true" include_only_weights="1,2">FrInel_pi_UBGenie</systematic>
 	<systematic type="spline_to_covariance" binning="var0" plotname="FrAbs_pi" tag="FSI" force_0_cv="true" include_only_weights="1,2">FrAbs_pi_UBGenie</systematic>
-	<systematic type="spline_to_covariance" binning="var0" plotname="MFP_N" tag="FSI" force_0_cv="true" include_only_weights="1,2">MFP_N_UBGenie</systematic>
-	<systematic type="spline_to_covariance" binning="var0" plotname="FrCEx_N" tag="FSI" force_0_cv="true" include_only_weights="1,2">FrCEx_N_UBGenie</systematic>
+	<systematic type="spline" binning="var0" plotname="MFP_N" tag="FSI" force_0_cv="true" include_only_weights="1,2">MFP_N_UBGenie</systematic>
+	<systematic type="spline" binning="var0" plotname="FrCEx_N" tag="FSI" force_0_cv="true" include_only_weights="1,2">FrCEx_N_UBGenie</systematic>
 	<systematic type="spline_to_covariance" binning="var0" plotname="FrInel_N" tag="FSI" force_0_cv="true" include_only_weights="1,2">FrInel_N_UBGenie</systematic>
 	<systematic type="spline_to_covariance" binning="var0" plotname="FrAbs_N" tag="FSI" force_0_cv="true" include_only_weights="1,2">FrAbs_N_UBGenie</systematic>
 

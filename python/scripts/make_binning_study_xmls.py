@@ -14,19 +14,22 @@ Two further changes relative to production, both confined to the study:
   already carry a ``restrict``. The 7 knots stay at -3..3; PROfit extrapolates
   the outer cubic segment, and the fit box is widened so the finer binnings,
   whose PCA2 minimum sat at the -3 edge, are not clipped.
-* Every variant except ``nominal`` keeps at least ``MIN_MC_EVENTS`` raw MC
+* Every variant except ``legacy`` keeps at least ``MIN_MC_EVENTS`` raw MC
   events in every reco bin (``--check`` verifies this against the input file
   and fails otherwise). PROfit's MC-statistics covariance takes the inverse of
   the per-bin MC error, so an empty bin makes the covariance singular and a
-  nearly empty one is dominated by MC noise. The ``nominal`` variant keeps the
-  production edges unchanged, since it is the reference, and is the one variant
-  exempt from the threshold (its corner bin log10(Q^2) in [-2, -1.5] x p_n in
-  [0, 0.1] holds only 5 MC events).
+  nearly empty one is dominated by MC noise. The ``legacy`` variant is the
+  hand-drawn 8 x 8 grid that was the production binning until 2026-10-03, kept
+  so the study stays comparable with the earlier results; it is the one variant
+  exempt from the threshold. (Its first two log10(Q^2) columns were merged into
+  [-2, -1.2] on 2026-09-30: the corner bin [-2, -1.5] x p_n [0, 0.1] was empty.)
 
 The study variants are the count-based grids grown by
 ``python/notebooks/17_count_based_binning.ipynb``, read from
 ``xml/binning_study/count_variants.json`` and merged into ``VARIANTS`` next to
-``nominal``. Use ``python/notebooks/15_binning_occupancy.ipynb`` to look at 
+``legacy``. Since 2026-10-03 production uses the ``count50`` grid (9 x 8 = 72
+bins), chosen by the study: the finest grid whose DetVar covariance stays
+physical (``count35`` and finer have bins with > 100 % detector uncertainty). Use ``python/notebooks/15_binning_occupancy.ipynb`` to look at 
 the occupancy of any candidate binning before adding it.
 
 Usage:
@@ -55,10 +58,11 @@ FAMILIES = {
 SPLINE_RESTRICT = (-4.0, 4.0)
 AXIAL_SPLINE_PATTERN = re.compile(r"weight_spline_FAzexp\w*|MaCCQE_UBGenie")
 
-NOMINAL_Q2 = [-2.00, -1.50, -1.20, -1.00, -0.85, -0.70, -0.55, -0.40, -0.20, 0.20]
-NOMINAL_PN = [0.00, 0.10, 0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 1.00]
+# Production binning until 2026-10-03; production is now the count50 grid of count_variants.json.
+LEGACY_Q2 = [-2.00, -1.20, -1.00, -0.85, -0.70, -0.55, -0.40, -0.20, 0.20]
+LEGACY_PN = [0.00, 0.10, 0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 1.00]
 
-# Minimum raw MC events per reco bin for every variant except ``nominal``.
+# Minimum raw MC events per reco bin for every variant except ``legacy``.
 MIN_MC_EVENTS = 10
 
 RECO_UNIT = "log10(Q^2 / GeV^2);p_n"
@@ -70,10 +74,10 @@ MC_SELECTION = "isdata==0 && isext==0 && isdirt==0 && isnuwro==0 && afro_1mu1p_s
 
 # name -> (log10(Q^2) edges, p_n edges, description)
 VARIANTS = {
-    "nominal": (
-        NOMINAL_Q2,
-        NOMINAL_PN,
-        "production binning (9 x 8 = 72 bins), rerun here as the in-study reference",
+    "legacy": (
+        LEGACY_Q2,
+        LEGACY_PN,
+        "production binning until 2026-10-03 (8 x 8 = 64 bins), kept as the pre-study reference",
     ),
 }
 
@@ -98,8 +102,8 @@ def load_json_variants(path=COUNT_VARIANTS_JSON):
 
 VARIANTS.update(load_json_variants())
 
-# Variants allowed to violate MIN_MC_EVENTS (the production reference).
-THRESHOLD_EXEMPT = {"nominal"}
+# Variants allowed to violate MIN_MC_EVENTS (the pre-study reference grid).
+THRESHOLD_EXEMPT = {"legacy"}
 
 
 def fmt_edge(value):
@@ -220,7 +224,7 @@ def check_occupancy(variants):
         flag = ""
         if below:
             if name in THRESHOLD_EXEMPT:
-                flag = f"  (production reference; {below} bin(s) below threshold tolerated)"
+                flag = f"  (legacy reference; {below} bin(s) below threshold tolerated)"
             else:
                 flag = f"  <-- {below} bin(s) below MIN_MC_EVENTS={MIN_MC_EVENTS}"
                 failing.append(name)
