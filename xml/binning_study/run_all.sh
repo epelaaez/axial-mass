@@ -4,10 +4,16 @@ set -euo pipefail
 # Run the finer-binning study: every XML below xml/binning_study/<family>/<variant>/.
 # The XMLs are generated from xml/<family> by python/scripts/make_binning_study_xmls.py;
 # regenerate them there rather than editing them here.
+#
+# Other studies with the same <family>/<variant>/<fit>.xml layout reuse this runner by
+# setting STUDY_DIR (their XML tree) and, optionally, STUDY_NAME (default: the tree's
+# basename): results go to OUTPUT_ROOT/<STUDY_NAME>_fit_results/. See xml/lowpn_study/run_all.sh.
 
-script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+script_dir="${STUDY_DIR:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)}"
+study_name="${STUDY_NAME:-$(basename -- "${script_dir}")}"
+generator="${STUDY_GENERATOR:-python/scripts/make_${study_name}_xmls.py}"
 output_root="${OUTPUT_ROOT:-/nevis/hopper/data/epelaez/axial_mass}"
-study_output="${output_root}/binning_study_fit_results"
+study_output="${output_root}/${study_name}_fit_results"
 profit_bin="${PROFIT_BIN:-/nevis/riverside/share/epelaez/PROfit/build/bin/PROfit}"
 nthreads="${NTHREADS:-8}"
 stages="${STAGES:-plot profile}"
@@ -51,6 +57,7 @@ Environment:
   CHI2=CNP                      Same as --chi2
   OUTPUT_ROOT, PROFIT_BIN, NTHREADS, STAGES, DRY_RUN, PLOT_WITH_SPLINES,
   MCMC_ITERATIONS, MCMC_BURNIN behave as in xml/run_all.sh.
+  STUDY_DIR, STUDY_NAME               run another study tree with this runner (see the header)
   PLOT_WITH_COVAR defaults to 0 here (covariance PDFs are slow at many bins);
   set PLOT_WITH_COVAR=1 to write them.
 USAGE
@@ -141,7 +148,7 @@ shopt -u nullglob
 
 if ((${#families[@]} == 0)); then
     echo "No family/variant directories with XML files below ${script_dir}." >&2
-    echo "Generate them with python/scripts/make_binning_study_xmls.py." >&2
+    echo "Generate them with ${generator}." >&2
     exit 1
 fi
 
