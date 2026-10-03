@@ -7,14 +7,14 @@
 <channel name="numuCC1p" plotname="log10(Q^2 / GeV^2) vs. p_n">
 	<bins2D
 		unit="log10(Q^2 / GeV^2);p_n"
-		edgesx="-2.00 -1.50 -1.20 -1.00 -0.85 -0.70 -0.55 -0.40 -0.20 0.20"
-		edgesy="0.00 0.10 0.20 0.30 0.40 0.50 0.60 0.70 1.00"
+		edgesx="-2.00 -1.16 -0.94 -0.80 -0.68 -0.57 -0.47 -0.34 -0.25 0.20"
+		edgesy="0.00 0.125 0.175 0.25 0.30 0.40 0.525 0.625 1.00"
 	/>
 	
 	<bins2D
 		unit="True log10(Q^2 / GeV^2);Reco log10(Q^2 / GeV^2)"
-		edgesx="-2.00 -1.50 -1.20 -1.00 -0.85 -0.70 -0.55 -0.40 -0.20 0.20"
-		edgesy="-2.00 -1.50 -1.20 -1.00 -0.85 -0.70 -0.55 -0.40 -0.20 0.20"
+		edgesx="-2.00 -1.16 -0.94 -0.80 -0.68 -0.57 -0.47 -0.34 -0.25 0.20"
+		edgesy="-2.00 -1.16 -0.94 -0.80 -0.68 -0.57 -0.47 -0.34 -0.25 0.20"
 		plot="false"
 	/>
 
@@ -61,7 +61,6 @@
 </MCFile>
 
 <!-- Weighted mixture of the preliminary Run 4b and Run 5 detector variations. -->
-<!--
 <DetVarFiles>
 	<DetVarSection treename="tree" include_only_weights="1" extra_weight="net_weight" cv_variation_matching_vars="detvar_sample,run,subrun,event">
 
@@ -82,7 +81,6 @@
 
 	</DetVarSection>
 </DetVarFiles>
--->
 
 <systematics>
 
@@ -90,7 +88,6 @@
 	<systematic type="mcstat" plotname="MC Stats" tag="other">MCStat</systematic>
 
 	<!-- Detector variation systematics -->
-<!--
 	<systematic name="Recomb2" type="spline_to_covariance" plotname="Recomb2" tag="DetVar" />
 	<systematic name="LYAtt" type="spline_to_covariance" plotname="LYAtt" tag="DetVar" />
 	<systematic name="LYDown" type="spline_to_covariance" plotname="LYDown" tag="DetVar" />
@@ -100,25 +97,29 @@
 	<systematic name="WireModYZ" type="spline_to_covariance" plotname="WireModYZ" tag="DetVar" />
 	<systematic name="WireModThetaXZ" type="spline_to_covariance" plotname="WireModThetaXZ" tag="DetVar" />
 	<systematic name="WireModThetaYZ" type="spline_to_covariance" plotname="WireModThetaYZ" tag="DetVar" />
--->
 
     <!-- Cross Section Systematics, 55 splines -->
 
 	<!-- <systematic type="spline" binning="var0" plotname="MACCQE" tag="QE" force_0_cv="true" include_only_weights="1,2">MaCCQE_UBGenie</systematic>
-	<systematic type="spline_to_covariance" binning="var0" plotname="AxFFCCQEshape" knobvals="0, 1" tag="QE" force_0_cv="true" include_only_weights="1,2">AxFFCCQEshape_UBGenie</systematic> -->
+	<systematic type="spline_to_covariance" binning="var0" plotname="AxFFCCQEshape" knobvals="1, 0" tag="QE" force_0_cv="true" include_only_weights="1,2">AxFFCCQEshape_UBGenie</systematic> -->
 
 	<systematic type="spline" binning="var0" plotname="FAzexpMinervaK6PCA1" knobvals="-3, -2, -1, 0, 1, 2, 3" tag="QE" force_0_cv="true" include_only_weights="1,2">weight_spline_FAzexpMinervaK6PCA1</systematic>
 	<systematic type="spline" binning="var0" plotname="FAzexpMinervaK6PCA2" knobvals="-3, -2, -1, 0, 1, 2, 3" tag="QE" force_0_cv="true" include_only_weights="1,2">weight_spline_FAzexpMinervaK6PCA2</systematic>
 	<systematic type="spline_cross_quad" binning="var0" plotname="FAzexpMinervaK6CROSS" tag="QE" force_0_cv="true" include_only_weights="1,2" splines="weight_spline_FAzexpMinervaK6PCA1, weight_spline_FAzexpMinervaK6PCA2">weight_spline_FAzexpMinervaK6CROSS</systematic>
 	
-	<systematic type="spline_to_covariance" binning="var0" plotname="VecFFCCQEshape" knobvals="0, 1" tag="QE" force_0_cv="true" include_only_weights="1,2">VecFFCCQEshape_UBGenie</systematic>
-	<systematic type="spline_to_covariance" binning="var0" plotname="RPA_CCQE" tag="QE" force_0_cv="true" include_only_weights="1,2">RPA_CCQE_UBGenie</systematic>
+	<!-- generated as GENIE minmax with min=0, max=1, tuned CV=0 (BBBA05 FF): universe 0 = max = variation, universe 1 = min = CV, hence knobvals "1, 0" -->
+	<systematic type="spline_to_covariance" binning="var0" plotname="VecFFCCQEshape" knobvals="1, 0" tag="QE" force_0_cv="true" include_only_weights="1,2">VecFFCCQEshape_UBGenie</systematic>
+	<!-- RPA_CCQE_UBGenie: the stored 7-point vector equals the tuned CV at index +0.6225, not at index 0
+	     (notebook 20_rpa_knob_grid_offset); these knobvals put the tune at knob 0 and keep one grid step = 1 sigma. -->
+	<systematic type="spline_to_covariance" binning="var0" plotname="RPA_CCQE" knobvals="-3.6225, -2.6225, -1.6225, -0.6225, 0.3775, 1.3775, 2.3775" tag="QE" force_0_cv="true" include_only_weights="1,2">RPA_CCQE_UBGenie</systematic>
 	<systematic type="spline_to_covariance" binning="var0" plotname="CoulombCCQE" tag="QE" force_0_cv="true" include_only_weights="1,2">CoulombCCQE_UBGenie</systematic>
 
 	<systematic type="spline_to_covariance" binning="var0" plotname="NormCCMEC" knobvals="-2, -1, 0, 1, 2, 3" tag="MEC" force_0_cv="true" include_only_weights="1,2">NormCCMEC_UBGenie</systematic>
 	<systematic type="spline_to_covariance" binning="var0" plotname="NormNCMEC" knobvals="-1, 0, 1, 2, 3" tag="MEC" force_0_cv="true" include_only_weights="1,2">NormNCMEC_UBGenie</systematic>
+	<!-- generated as GENIE minmax with min=0, max=1, tuned CV=1 (GENIE empirical MEC shape): universe 0 = max = CV, universe 1 = min = Nieves variation, so knobvals "0, 1" is already correct -->
 	<systematic type="spline_to_covariance" binning="var0" plotname="XSecShape_CCMEC" knobvals="0, 1" tag="MEC" force_0_cv="true" include_only_weights="1,2">XSecShape_CCMEC_UBGenie</systematic>
-	<systematic type="spline_to_covariance" binning="var0" plotname="DecayAngMEC" knobvals="0, 1" tag="MEC" force_0_cv="true" include_only_weights="1,2">DecayAngMEC_UBGenie</systematic>
+	<!-- generated as GENIE minmax with min=0, max=1, tuned CV=0 (isotropic): universe 0 = max = variation, universe 1 = min = CV, hence knobvals "1, 0" -->
+	<systematic type="spline_to_covariance" binning="var0" plotname="DecayAngMEC" knobvals="1, 0" tag="MEC" force_0_cv="true" include_only_weights="1,2">DecayAngMEC_UBGenie</systematic>
 	<systematic type="spline_to_covariance" binning="var0" plotname="FracPN_CCMEC" tag="MEC" force_0_cv="true" include_only_weights="1,2">FracPN_CCMEC_UBGenie</systematic>
 	<systematic type="spline_to_covariance" binning="var0" plotname="FracDelta_CCMEC" tag="MEC" force_0_cv="true" include_only_weights="1,2">FracDelta_CCMEC_UBGenie</systematic>
 
@@ -127,8 +128,10 @@
 	<systematic type="spline_to_covariance" binning="var0" plotname="MaNCRES" tag="RES" force_0_cv="true" include_only_weights="1,2">MaNCRES_UBGenie</systematic>
 	<systematic type="spline_to_covariance" binning="var0" plotname="MvNCRES" tag="RES" force_0_cv="true" include_only_weights="1,2">MvNCRES_UBGenie</systematic>
 	<systematic type="spline_to_covariance" binning="var0" plotname="RDecBR1eta" tag="RES" force_0_cv="true" include_only_weights="1,2">RDecBR1eta_UBGenie</systematic>
-	<systematic type="spline_to_covariance" binning="var0" plotname="Theta_Delta2Npi" knobvals="0, 1" tag="RES" force_0_cv="true" include_only_weights="1,2">Theta_Delta2Npi_UBGenie</systematic>
+	<!-- generated as GENIE minmax with min=0, max=1, tuned CV=0 (isotropic): universe 0 = max = variation, universe 1 = min = CV, hence knobvals "1, 0" -->
+	<systematic type="spline_to_covariance" binning="var0" plotname="Theta_Delta2Npi" knobvals="1, 0" tag="RES" force_0_cv="true" include_only_weights="1,2">Theta_Delta2Npi_UBGenie</systematic>
 	<systematic type="spline_to_covariance" binning="var0" plotname="RDecBR1gamma" tag="RES" force_0_cv="true" include_only_weights="1,2">RDecBR1gamma_UBGenie</systematic>
+	<!-- generated as GENIE minmax with min=0, max=1, CV=0, but the production fcl misspelled the knob ("ThetaDelta2Rad"), so both universes equal the CV and this has no effect until resimulated -->
 	<systematic type="spline_to_covariance" binning="var0" plotname="ThetaDelta2NRad" knobvals="0, 1" tag="RES" force_0_cv="true" include_only_weights="1,2">ThetaDelta2NRad_UBGenie</systematic>
 
 	<systematic type="spline_to_covariance" binning="var0" plotname="NormCCCOH" knobvals="-1, 0, 1, 2, 3" tag="COH" force_0_cv="true" include_only_weights="1,2">NormCCCOH_UBGenie</systematic>
