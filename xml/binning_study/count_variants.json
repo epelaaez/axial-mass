@@ -1,6 +1,6 @@
 {
  "_meta": {
-  "generated": "2026-09-30",
+  "generated": "2026-10-18",
   "notebook": "python/notebooks/17_count_based_binning.ipynb",
   "rule": "greedy equal-population splitting, min raw MC events per bin = N_min",
   "q2_range": [

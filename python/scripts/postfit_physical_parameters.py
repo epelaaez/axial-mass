@@ -22,8 +22,7 @@ from matplotlib.colors import to_rgba
 from matplotlib.legend_handler import HandlerTuple
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
-from matplotlib.text import Text
-from matplotlib.ticker import AutoMinorLocator, MaxNLocator
+from matplotlib.ticker import AutoMinorLocator, FixedLocator, MaxNLocator
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 import numpy as np
@@ -189,9 +188,11 @@ class FitSpec:
 
 # Modeling knobs floated as nuisance parameters, as PROfit labels them (plotname) and as
 # the chain branches are named. Display names and prior ranges for the corner plots below.
-NUISANCE_LABELS = ("RPA_CCQE", "XSecShape_CCMEC", "MFP_N", "DecayAngMEC", "FrCEx_N")
-NUISANCE_BRANCHES = ("RPA_CCQE_UBGenie", "XSecShape_CCMEC_UBGenie", "MFP_N_UBGenie",
-                           "DecayAngMEC_UBGenie", "FrCEx_N_UBGenie")
+# Ordered by how strongly the data constrain them, which puts the informative
+# panels next to the physical parameters in the corner-style figures, with
+# the two-point model switches (XSecShape_CCMEC, DecayAngMEC) last.
+NUISANCE_LABELS = ("RPA_CCQE", "FrCEx_N", "MFP_N", "XSecShape_CCMEC", "DecayAngMEC")
+NUISANCE_BRANCHES = tuple(f"{label}_UBGenie" for label in NUISANCE_LABELS)
 NUISANCE_DISPLAY_NAMES = {
     "AxFFCCQEshape": "AxFFCCQEshape pull",
     "NormCCMEC": "NormCCMEC pull",
@@ -212,6 +213,29 @@ NUISANCE_PRIOR_RANGES = {
     "DecayAngMEC": (0, 1),
     "FrCEx_N": (-3, 3),
 }
+# Short axis labels for the corner-style figures, keyed by the display names
+# above. The long "... pull" names stay the keys of every result array and of
+# the notebooks' AXIS_RANGES; the captions map these short labels to the GENIE
+# knob names.
+NUISANCE_SHORT_LABELS = {
+    "AxFFCCQEshape pull": "AxFF shape",
+    "NormCCMEC pull": "MEC norm",
+    "RPA CCQE pull": "RPA",
+    "XSecShape CCMEC pull": "MEC shape",
+    "MFP N pull": r"MFP $N$",
+    "DecayAngMEC pull": "MEC angle",
+    "FrCEx N pull": r"FrCEx $N$",
+}
+# Hard bounds (the XMLs' restrict=) of the two-point switches, keyed by display
+# name. Their densities (posterior and prior alike) are estimated on exactly
+# this range with reflection at the edges, and their panels show no padding
+# beyond it.
+NUISANCE_BOUNDS = {
+    "AxFFCCQEshape pull": (0, 1),
+    "XSecShape CCMEC pull": (0, 1),
+    "DecayAngMEC pull": (0, 1),
+}
+
 
 SPECS = (
     # The M_A fits and the *_nuisance fits float the same five modeling knobs (since 2026-10-03,
@@ -509,7 +533,15 @@ def load_fit(spec, suite, burn_in=0, thin=1, n_prior=50_000, seed=2026,
         _correlation_from_covariance(covariance_matrix),
         index=joint_names, columns=joint_names,
     )
+    # Chain diagnostics on the fit coordinates (every chain branch): the
+    # integrated autocorrelation time per coordinate and the effective sample
+    # size the density estimates and run_suite's warning go by.
+    chain_names = list(spec.chain_branches if is_ma_fit else all_branches)
+    autocorrelation_times, effective_samples = _chain_diagnostics(pulls, chain_names)
     result = dict(spec=spec, root_file=root_file, central=central, sigma=sigma,
+                  autocorrelation_times=autocorrelation_times,
+                  effective_samples=effective_samples,
+                  ess_min=min(effective_samples.values()),
                   samples=samples, prior_samples=prior_samples, profile=profile,
                   q16=q16, q84=q84, names=names, summary=summary,
                   covariance=covariance, correlation=correlation,
@@ -563,39 +595,68 @@ def _credible_density_levels(histogram, probabilities=(0.95, 0.68)):
     return sorted(set(threshold for threshold in thresholds if threshold > 0))
 
 
-def _smooth_density(samples, bins):
-    """Return a lightly smoothed 1D histogram density for line display."""
-    density, edges = np.histogram(samples, bins=max(80, 2 * bins), density=True)
-    centers = (edges[:-1] + edges[1:]) / 2
-    radius, sigma = 5, 1.5
+def _reflect_pad(values, radius, axis):
+    """Mirror ``values`` by ``radius`` entries at both ends of ``axis``."""
+    pad = [(0, 0)] * values.ndim
+    pad[axis] = (radius, radius)
+    return np.pad(values, pad, mode="symmetric")
+
+
+def _gaussian_kernel(sigma):
+    """Normalised Gaussian kernel of width ``sigma`` bins and its radius."""
+    radius = max(1, int(np.ceil(3 * sigma)))
     offsets = np.arange(-radius, radius + 1)
     kernel = np.exp(-.5 * (offsets / sigma) ** 2)
-    kernel /= kernel.sum()
+    return kernel / kernel.sum(), radius
+
+
+def _smooth_density(samples, bins, bounds=None, smoothing=1.0):
+    """Return a lightly smoothed 1D histogram density for line display.
+
+    ``bounds`` marks a hard parameter range (an XML ``restrict``): the
+    histogram then covers exactly that range and is mirrored at both ends
+    before smoothing, so a posterior piled up against the bound keeps its
+    height there instead of being averaged with the empty space beyond it.
+    ``smoothing`` scales the kernel width (in bins), see
+    :func:`_smoothing_factor`.
+    """
+    density, edges = np.histogram(samples, bins=max(80, 2 * bins), range=bounds,
+                                  density=True)
+    centers = (edges[:-1] + edges[1:]) / 2
+    kernel, radius = _gaussian_kernel(1.5 * smoothing)
+    if bounds is not None:
+        smoothed = np.convolve(_reflect_pad(density, radius, 0), kernel, mode="same")
+        return centers, smoothed[radius:-radius]
     # Divide by the kernel's overlap with the histogram. Without this the
     # convolution averages in the zeros beyond the first and last bin, which
-    # drags the curve towards zero exactly where a posterior piles up against
-    # a hard parameter bound.
+    # drags the curve towards zero where the samples simply run out.
     coverage = np.convolve(np.ones_like(density), kernel, mode="same")
     return centers, np.convolve(density, kernel, mode="same") / coverage
 
 
-def _smooth_density_2d(histogram, sigma=1.0):
+def _smooth_density_2d(histogram, sigma=1.0, reflect=(False, False)):
     """Apply a small separable Gaussian kernel to a 2D density estimate.
 
     ``sigma`` is in bins, so a finer binning needs a larger value to hold the
-    physical smoothing length fixed. The default reproduces the kernel every
-    caller used before the parameter existed.
+    physical smoothing length fixed. ``reflect`` says per axis (x, then y)
+    whether the histogram ends at a hard parameter bound: that axis is then
+    mirrored at its ends before smoothing, as in :func:`_smooth_density`.
     """
-    radius = max(1, int(np.ceil(3 * sigma)))
-    offsets = np.arange(-radius, radius + 1)
-    kernel = np.exp(-.5 * (offsets / sigma) ** 2)
-    kernel /= kernel.sum()
-    smoothed = np.apply_along_axis(
-        lambda values: np.convolve(values, kernel, mode="same"), 0, histogram
-    )
-    return np.apply_along_axis(
-        lambda values: np.convolve(values, kernel, mode="same"), 1, smoothed
-    )
+    kernel, radius = _gaussian_kernel(sigma)
+    smoothed = np.asarray(histogram, dtype=float)
+    for axis in (0, 1):
+        if reflect[axis]:
+            padded = _reflect_pad(smoothed, radius, axis)
+            smoothed = np.apply_along_axis(
+                lambda values: np.convolve(values, kernel, mode="same"), axis, padded
+            )
+            keep = np.arange(radius, smoothed.shape[axis] - radius)
+            smoothed = np.take(smoothed, keep, axis=axis)
+        else:
+            smoothed = np.apply_along_axis(
+                lambda values: np.convolve(values, kernel, mode="same"), axis, smoothed
+            )
+    return smoothed
 
 
 def _density_grid_to_edges(xedges, yedges, density):
@@ -617,7 +678,7 @@ def _density_grid_to_edges(xedges, yedges, density):
     )
 
 
-def _panel_binning(display_range, values, bins, max_growth=4):
+def _panel_binning(display_range, values, bins, max_growth=4, bounds=None):
     """Histogram bounds and bin count for one axis of a corner panel.
 
     The bounds cover the panel, or the contours stop inside it wherever
@@ -626,7 +687,10 @@ def _panel_binning(display_range, values, bins, max_growth=4):
     credible levels. The bin count grows with the widened bounds so that the
     bin width stays the one ``bins`` would have given over the samples alone,
     which keeps the contour resolution independent of the requested view.
+    A parameter with hard ``bounds`` is histogrammed on exactly those.
     """
+    if bounds is not None:
+        return tuple(bounds), bins
     low = min(display_range[0], float(values.min()))
     high = max(display_range[1], float(values.max()))
     span = float(values.max() - values.min())
@@ -636,13 +700,30 @@ def _panel_binning(display_range, values, bins, max_growth=4):
     return (low, high), int(min(widened, max_growth * bins))
 
 
-def _style_corner_ticks(ax, x_only=False):
-    """Few, evenly spaced ticks that cannot collide across adjacent panels."""
-    ax.xaxis.set_major_locator(MaxNLocator(nbins=4, prune="both"))
-    ax.xaxis.set_minor_locator(AutoMinorLocator(2))
+def _bounded_ticks(axis, bounds):
+    """Ticks at the ends and the middle of a hard-bounded parameter range."""
+    low, high = bounds
+    axis.set_major_locator(FixedLocator([low, (low + high) / 2, high]))
+    axis.set_minor_locator(AutoMinorLocator(2))
+
+
+def _style_corner_ticks(ax, x_only=False, x_bounds=None, y_bounds=None):
+    """Few, evenly spaced ticks that cannot collide across adjacent panels.
+
+    Three major ticks per axis, pruned at the panel edges; an axis with hard
+    ``bounds`` instead shows its two ends and the middle.
+    """
+    if x_bounds is None:
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=3, prune="both"))
+        ax.xaxis.set_minor_locator(AutoMinorLocator(2))
+    else:
+        _bounded_ticks(ax.xaxis, x_bounds)
     if not x_only:
-        ax.yaxis.set_major_locator(MaxNLocator(nbins=4, prune="both"))
-        ax.yaxis.set_minor_locator(AutoMinorLocator(2))
+        if y_bounds is None:
+            ax.yaxis.set_major_locator(MaxNLocator(nbins=3, prune="both"))
+            ax.yaxis.set_minor_locator(AutoMinorLocator(2))
+        else:
+            _bounded_ticks(ax.yaxis, y_bounds)
     ax.tick_params(which="both", direction="in", top=True, right=True)
     ax.tick_params(which="minor", length=1.8)
 
@@ -667,30 +748,72 @@ def _diagnostic_view(result, show_all_coefficients=False):
 
 
 def _parameter_label(name):
-    """Return a publication-style parameter label for plot axes and titles."""
+    """Return a publication-style parameter label for plot axes and titles.
+
+    Floated knobs get the short labels in :data:`NUISANCE_SHORT_LABELS`; the
+    figure captions map those to the GENIE knob names.
+    """
     if name.startswith("a") and name[1:].isdigit():
         return rf"$a_{{{name[1:]}}}$"
-    labels = {
-        "M_A [GeV]": r"$M_{A}\,[\mathrm{GeV}]$",
-        "AxFFCCQEshape pull": r"$\mathrm{AxFFCCQEshape\ pull}$",
-        "NormCCMEC pull": r"$\mathrm{NormCCMEC\ pull}$",
-        "RPA CCQE pull": r"$\mathrm{RPA\ CCQE\ pull}$",
-    }
-    if name in labels:
-        return labels[name]
-    return name
+    if name == "M_A [GeV]":
+        return r"$M_{A}\,[\mathrm{GeV}]$"
+    if name in NUISANCE_SHORT_LABELS:
+        return NUISANCE_SHORT_LABELS[name]
+    return name.removesuffix(" pull")
 
 
-# All corner PDFs are placed at the same 0.5\linewidth width in the paper.
-# The two-parameter corner is the typography reference; larger source figures
-# are shrunk more by LaTeX, so their source fonts must grow by the same factor.
+def _autocorrelation_time(chain, window_factor=5.0):
+    """Integrated autocorrelation time of one chain coordinate, in steps.
+
+    Sokal's estimate with the automatic window of Goodman and Weare (as in
+    emcee): the autocorrelation sum is truncated at the first lag M with
+    M >= window_factor * tau(M). Never below 1.
+    """
+    values = np.asarray(chain, dtype=float)
+    values = values - values.mean()
+    n = len(values)
+    if n < 10 or not np.any(values):
+        return 1.0
+    spectrum = np.fft.rfft(values, n=2 * n)
+    acf = np.fft.irfft(spectrum * np.conj(spectrum))[:n]
+    acf /= acf[0]
+    taus = 2.0 * np.cumsum(acf) - 1.0
+    inside_window = np.arange(n) < window_factor * taus
+    window = int(np.argmin(inside_window)) if np.any(~inside_window) else n - 1
+    return float(max(1.0, taus[window]))
+
+
+def _chain_diagnostics(pulls, names):
+    """Autocorrelation time and effective sample size per chain coordinate."""
+    n_steps = len(pulls)
+    times = {name: _autocorrelation_time(pulls[:, i]) for i, name in enumerate(names)}
+    sizes = {name: n_steps / tau for name, tau in times.items()}
+    return times, sizes
+
+
+# Effective sample size at which the density estimates use their nominal
+# kernel; shorter chains get a wider one (see _smoothing_factor) and
+# run_suite warns below it.
+SMOOTHING_REFERENCE_ESS = 2000.0
+
+
+def _smoothing_factor(result):
+    """Kernel-width factor for the density estimates of one fit.
+
+    Grows as (SMOOTHING_REFERENCE_ESS / ESS)^(1/5), the usual bandwidth
+    scaling with sample size, from 1 at the reference effective sample size,
+    clipped to [1, 2.5]. Fits loaded without chain diagnostics use 1.
+    """
+    ess = result.get("ess_min")
+    if not ess:
+        return 1.0
+    return float(np.clip((SMOOTHING_REFERENCE_ESS / ess) ** 0.2, 1.0, 2.5))
+
+
+# All one-column corner PDFs are placed at the same width in the paper. The
+# two-parameter corner is the typography reference: every other figure derives
+# its font sizes from it through column_font_sizes below.
 CORNER_REFERENCE_WIDTH = 4.0
-
-
-def _scale_figure_fonts(figure, scale):
-    """Scale every existing text artist, including ticks and offset text."""
-    for artist in figure.findobj(match=Text):
-        artist.set_fontsize(artist.get_fontsize() * scale)
 
 
 # Font sizes the reference corner draws at CORNER_REFERENCE_WIDTH. Every other
@@ -819,7 +942,7 @@ def plot_distribution_overlay(results, selections, bins=55,
                               n_reference_samples=50_000, seed=2026,
                               figsize=(7.0, 6.2), labels=None, colors=None,
                               smooth=1.0, legend_loc="upper center",
-                              legend_headroom=.30,
+                              legend_headroom=.30, legend_clearance=.03,
                               note="68% and 95% credible regions"):
     """Overlay chosen priors/posteriors as contours in a common (a1, a2) basis.
 
@@ -856,7 +979,9 @@ def plot_distribution_overlay(results, selections, bins=55,
     ``legend_headroom`` opens a band above the contours for it, as a fraction
     of the plotted y range. The band is added to the axes only, so the density
     estimate underneath is unchanged; set it to 0 when moving the legend to a
-    corner the contours already leave free.
+    corner the contours already leave free. The band is a minimum: wherever a
+    contour still reaches under the legend's frame the top is raised further
+    until the frame clears it by ``legend_clearance`` of the y range.
     """
     if not selections:
         raise ValueError("Select at least one prior or posterior distribution")
@@ -1030,22 +1155,54 @@ def plot_distribution_overlay(results, selections, bins=55,
         borderaxespad=.8, columnspacing=1.8,
     )
     legend.set_zorder(20)
+
+    # The legend is anchored in axes coordinates, so its lower edge sits at a
+    # fixed axes fraction whatever the y range: raise the top until that
+    # fraction lies above the highest contour vertex within the legend's x span.
+    fig.canvas.draw()
+    box = legend.get_window_extent(fig.canvas.get_renderer())
+    axes_box = box.transformed(ax.transAxes.inverted())
+    data_box = box.transformed(ax.transData.inverted())
+    vertices = np.concatenate([
+        path.vertices for collection in ax.collections
+        for path in collection.get_paths()
+    ])
+    under = (vertices[:, 0] >= data_box.x0) & (vertices[:, 0] <= data_box.x1)
+    if axes_box.y0 > 0 and under.any():
+        ylow, ytop = ax.get_ylim()
+        peak = vertices[under, 1].max() + legend_clearance * (ytop - ylow)
+        ax.set_ylim(ylow, max(ytop, ylow + (peak - ylow) / axes_box.y0))
     return fig
+
+
+# Default coordinates of the dipole-M_A overlay corner: M_A with the two
+# unbounded knobs the data move most visibly (RPA correlates with M_A, FrCEx N
+# is pulled by about one sigma). Any of a fit's ``ma_joint_names`` can be
+# selected instead; the two-point switches draw ragged contours here because
+# their posteriors are nearly flat, so they are better read off the grid.
+MA_OVERLAY_PARAMETERS = ("M_A [GeV]", "RPA CCQE pull", "FrCEx N pull")
 
 
 @mpl.rc_context(PUBLICATION_RC)
 def plot_ma_posterior_overlay(results,
                               fit_keys=("ma", "ma_uniform"),
-                              labels=None, bins=45, figsize=(7.2, 7.2)):
-    """Compare M_A, NormCCMEC, and RPA posteriors from compatible fits.
+                              labels=None, parameters=MA_OVERLAY_PARAMETERS,
+                              bins=45,
+                              figsize=(CORNER_REFERENCE_WIDTH, CORNER_REFERENCE_WIDTH),
+                              placed_width=COLUMN_WIDTH):
+    """Overlay the joint posteriors of several dipole-M_A fits in one corner.
 
-    Legend entries follow :func:`posterior_label` and name the prior whenever
-    the selected fits use different priors; ``labels`` maps fit keys to
-    replacement text.
+    ``parameters`` names the coordinates to show, as they appear in each
+    fit's ``ma_joint_names`` (M_A and the floated knobs); the default is
+    :data:`MA_OVERLAY_PARAMETERS`. Legend entries follow
+    :func:`posterior_label` and name the prior whenever the selected fits use
+    different priors; ``labels`` maps fit keys to replacement text. Fonts come
+    from :func:`column_font_sizes` for a figure ``figsize[0]`` inches wide
+    printed at ``placed_width``.
     """
     colors = ("#0072B2", "#D55E00", "#009E73", "#CC79A7")
+    parameters = tuple(parameters)
     overlays = []
-    expected_names = None
     for index, key in enumerate(fit_keys):
         if key not in results:
             raise KeyError(
@@ -1055,58 +1212,71 @@ def plot_ma_posterior_overlay(results,
         result = results[key]
         if "ma_joint_samples" not in result:
             raise ValueError(f"{key!r} is not a dipole-M_A fit")
-        names = tuple(result["ma_joint_names"])
-        samples = np.asarray(result["ma_joint_samples"])
-        if names != ("M_A [GeV]", "NormCCMEC pull", "RPA CCQE pull"):
+        names = list(result["ma_joint_names"])
+        missing = [name for name in parameters if name not in names]
+        if missing:
             raise ValueError(
-                f"{key!r} has parameters {names}; expected M_A, NormCCMEC, "
-                "and RPA_CCQE in that order"
+                f"{key!r} has no parameter(s) {missing}; available: {names}"
             )
-        if expected_names is None:
-            expected_names = names
-        elif names != expected_names:
-            raise ValueError("Selected M_A posteriors use different parameters")
+        columns = [names.index(name) for name in parameters]
+        samples = np.asarray(result["ma_joint_samples"])[:, columns]
         overlays.append((key, result["spec"], samples,
-                         colors[index % len(colors)]))
+                         colors[index % len(colors)], _smoothing_factor(result)))
 
     # Standard legend text; ``labels`` (keyed by fit key) overrides entries.
     labels = dict(labels or {})
-    single_prior = len({prior_label(spec) for _, spec, _, _ in overlays}) == 1
+    single_prior = len({prior_label(spec) for _, spec, _, _, _ in overlays}) == 1
     overlays = [
-        (labels.get(key, posterior_label(spec, single_prior)), samples, color)
-        for key, spec, samples, color in overlays
+        (labels.get(key, posterior_label(spec, single_prior)), samples, color, smoothing)
+        for key, spec, samples, color, smoothing in overlays
     ]
 
-    n = len(expected_names)
-    joined = np.concatenate([samples for _, samples, _ in overlays], axis=0)
+    n = len(parameters)
+    bounds = [NUISANCE_BOUNDS.get(name) for name in parameters]
+    joined = np.concatenate([samples for _, samples, _, _ in overlays], axis=0)
     ranges = []
     for coordinate in range(n):
+        if bounds[coordinate] is not None:
+            ranges.append(tuple(bounds[coordinate]))
+            continue
         low, high = np.quantile(joined[:, coordinate], [0.001, 0.999])
         padding = .04 * (high - low) if high > low else .5
         ranges.append((low - padding, high + padding))
 
-    with mpl.rc_context(PUBLICATION_RC):
-        fig, axes = plt.subplots(n, n, figsize=figsize, squeeze=False)
+    fonts = column_font_sizes(figsize[0], placed_width)
+    fig, axes = plt.subplots(n, n, figsize=figsize, squeeze=False)
     for row in range(n):
         for col in range(n):
             ax = axes[row, col]
             if row < col:
                 ax.set_visible(False)
                 continue
-            for label, samples, color in overlays:
+            # As in plot_corner: every diagonal panel after the first ends a
+            # row of joint panels and is drawn sideways to line up with it.
+            sideways = row == col and row > 0
+            for label, samples, color, smoothing in overlays:
                 if row == col:
-                    centers, density = _smooth_density(samples[:, col], bins)
-                    ax.plot(centers, density, color=color, lw=2.0)
+                    centers, density = _smooth_density(
+                        samples[:, col], bins, bounds=bounds[col],
+                        smoothing=smoothing,
+                    )
+                    if sideways:
+                        ax.plot(density, centers, color=color, lw=1.6)
+                    else:
+                        ax.plot(centers, density, color=color, lw=1.6)
                 else:
                     x_range, x_bins = _panel_binning(
-                        ranges[col], samples[:, col], bins)
+                        ranges[col], samples[:, col], bins, bounds=bounds[col])
                     y_range, y_bins = _panel_binning(
-                        ranges[row], samples[:, row], bins)
+                        ranges[row], samples[:, row], bins, bounds=bounds[row])
                     histogram, xedges, yedges = np.histogram2d(
                         samples[:, col], samples[:, row],
                         bins=[x_bins, y_bins], range=[x_range, y_range],
                     )
-                    smoothed = _smooth_density_2d(histogram)
+                    smoothed = _smooth_density_2d(
+                        histogram, sigma=smoothing,
+                        reflect=(bounds[col] is not None, bounds[row] is not None),
+                    )
                     levels = _credible_density_levels(smoothed)
                     if levels:
                         xgrid, ygrid, density = _density_grid_to_edges(
@@ -1115,60 +1285,223 @@ def plot_ma_posterior_overlay(results,
                         ax.contour(
                             xgrid, ygrid, density.T, levels=levels,
                             colors=color,
-                            linewidths=np.linspace(1.2, 2.0, len(levels)),
+                            linewidths=np.linspace(.9, 1.6, len(levels)),
                         )
-            ax.set_xlim(ranges[col])
+            if sideways:
+                ax.set_ylim(ranges[row])
+                ax.set_xlim(left=0)
+            else:
+                ax.set_xlim(ranges[col])
             if row > col:
                 ax.set_ylim(ranges[row])
-            if row == col:
+            if row == col == 0:
                 ax.set_yticks([])
-            if row == n - 1:
-                ax.set_xlabel(_parameter_label(expected_names[col]), fontsize=10.5)
-            else:
+            if row == n - 1 and not sideways:
+                ax.set_xlabel(_parameter_label(parameters[col]),
+                              fontsize=fonts["label"])
+            elif not sideways:
                 ax.set_xticklabels([])
             if col == 0 and row > 0:
-                ax.set_ylabel(_parameter_label(expected_names[row]), fontsize=10.5)
+                ax.set_ylabel(_parameter_label(parameters[row]),
+                              fontsize=fonts["label"])
             elif col > 0:
                 ax.set_yticklabels([])
-            ax.tick_params(labelsize=9)
-            _style_corner_ticks(ax, x_only=row == col)
+            ax.tick_params(labelsize=fonts["tick"])
+            if row == col == 0:
+                _style_corner_ticks(ax, x_only=True, x_bounds=bounds[col])
+            elif sideways:
+                _style_corner_ticks(ax, y_bounds=bounds[row])
+                ax.set_xticks([])
+            else:
+                _style_corner_ticks(ax, x_bounds=bounds[col], y_bounds=bounds[row])
             ax.grid(color="#9AA4B2", alpha=.15, linewidth=.6)
 
     handles = [Line2D([], [], color=color, lw=1.8, label=label)
-               for label, _, color in overlays]
+               for label, _, color, _ in overlays]
     # Lay out the corner panels without the legend. An axes-attached legend
     # outside the first diagonal panel makes tight_layout reserve a large gap
     # between every column, dramatically shrinking the plots.
-    fig.tight_layout(pad=.65)
+    fig.tight_layout(pad=.5)
     top_left = axes[0, 0].get_position()
+    legend_x = (axes[0, 1].get_position().x0 + .01 if n > 1
+                else top_left.x1 + .02)
     legend = fig.legend(
         handles=handles, loc="upper left",
-        bbox_to_anchor=(top_left.x1 + .02, top_left.y1),
-        fontsize=10.5, borderaxespad=0, handlelength=2.2,
+        bbox_to_anchor=(legend_x, top_left.y1),
+        fontsize=fonts["legend"], borderaxespad=0, handlelength=2.2,
     )
     legend.set_in_layout(False)
     return fig
 
 
+# Shared drawing conventions of the corner-style figures: nested blue regions
+# (darker 68%, lighter 95%, no outline), the prior in red, the profile best
+# fit in black.
+CORNER_POSTERIOR_COLOR = "#0072C1"
+CORNER_68_FILL = "#7FB8DF"
+CORNER_95_FILL = "#BFDBEF"
+CORNER_BEST_FIT_COLOR = "#000000"
+CORNER_PRIOR_COLOR = "#D62728"
+
+
+def _corner_layout(n):
+    """Source width and printed width of an n-parameter corner.
+
+    Corners with up to four parameters are one-column figures drawn at the
+    reference width; wider ones are drawn at the full text width and must be
+    placed with ``figure*``. Fonts derive from :func:`column_font_sizes`, so
+    every corner prints with the same type size.
+    """
+    if n <= 4:
+        return CORNER_REFERENCE_WIDTH, COLUMN_WIDTH
+    return TEXT_WIDTH, TEXT_WIDTH
+
+
+def _display_ranges(names, samples, prior_samples, prior_mask, axis_ranges):
+    """Per-parameter display range: hard bounds, then axis_ranges, then data."""
+    ranges = []
+    for i, name in enumerate(names):
+        if name in NUISANCE_BOUNDS:
+            ranges.append(tuple(NUISANCE_BOUNDS[name]))
+            continue
+        if axis_ranges is not None and name in axis_ranges:
+            ranges.append(tuple(axis_ranges[name]))
+            continue
+        range_samples = (np.r_[samples[:, i], prior_samples[:, i]]
+                         if prior_mask[i] else samples[:, i])
+        low, high = range_samples.min(), range_samples.max()
+        padding = .03 * (high - low) if high > low else .5
+        ranges.append((low - padding, high + padding))
+    return ranges
+
+
+def _draw_marginal(ax, samples, prior_samples, best_fit, bins, bounds,
+                   smoothing, show_prior, vertical=False):
+    """Posterior (and prior) density line with the best-fit marker line."""
+    centers, density = _smooth_density(samples, bins, bounds=bounds,
+                                       smoothing=smoothing)
+    curves = [(centers, density, CORNER_POSTERIOR_COLOR, 1.4, 1.0)]
+    if show_prior:
+        prior_centers, prior_density = _smooth_density(
+            prior_samples, bins, bounds=bounds
+        )
+        curves.append((prior_centers, prior_density, CORNER_PRIOR_COLOR, 1.0, .6))
+    for centers, density, color, lw, alpha in curves:
+        if vertical:
+            ax.plot(density, centers, color=color, lw=lw, alpha=alpha)
+        else:
+            ax.plot(centers, density, color=color, lw=lw, alpha=alpha)
+    line = ax.axhline if vertical else ax.axvline
+    line(best_fit, color=CORNER_BEST_FIT_COLOR, ls="--", lw=1.0)
+
+
+def _draw_joint_panel(ax, x, y, x_range, y_range, x_bounds, y_bounds, bins,
+                      smoothing, prior=None):
+    """Nested 68%/95% posterior regions and optional prior contours.
+
+    ``prior`` is ``(prior_x, prior_y)`` to draw the prior's 68% and 95%
+    contours, or ``None``. Against a hard-bounded axis the prior is binned
+    and reflected exactly like the posterior, so its contour reaches the
+    bound (a truncated normal on [0, 1] then draws a box flush with it).
+    """
+    x_range, x_bins = _panel_binning(x_range, x, bins, bounds=x_bounds)
+    y_range, y_bins = _panel_binning(y_range, y, bins, bounds=y_bounds)
+    reflect = (x_bounds is not None, y_bounds is not None)
+    histogram, xedges, yedges = np.histogram2d(
+        x, y, bins=[x_bins, y_bins], range=[x_range, y_range],
+    )
+    histogram = _smooth_density_2d(histogram, sigma=smoothing, reflect=reflect)
+    levels = _credible_density_levels(histogram)
+    if levels:
+        xgrid, ygrid, density = _density_grid_to_edges(xedges, yedges, histogram)
+        upper = np.nextafter(density.max(), np.inf)
+        if len(levels) == 2:
+            ax.contourf(
+                xgrid, ygrid, density.T, levels=[levels[0], levels[1], upper],
+                colors=[CORNER_95_FILL, CORNER_68_FILL],
+            )
+        else:
+            ax.contourf(
+                xgrid, ygrid, density.T, levels=[levels[0], upper],
+                colors=[CORNER_68_FILL],
+            )
+    if prior is not None:
+        prior_x, prior_y = prior
+        prior_x_range, prior_x_bins = _panel_binning(
+            x_range, prior_x, bins, bounds=x_bounds)
+        prior_y_range, prior_y_bins = _panel_binning(
+            y_range, prior_y, bins, bounds=y_bounds)
+        prior_histogram, prior_xedges, prior_yedges = np.histogram2d(
+            prior_x, prior_y, bins=[prior_x_bins, prior_y_bins],
+            range=[prior_x_range, prior_y_range],
+        )
+        prior_histogram = _smooth_density_2d(prior_histogram, reflect=reflect)
+        prior_levels = _credible_density_levels(prior_histogram)
+        if prior_levels:
+            prior_xgrid, prior_ygrid, prior_density = _density_grid_to_edges(
+                prior_xedges, prior_yedges, prior_histogram
+            )
+            ax.contour(
+                prior_xgrid, prior_ygrid, prior_density.T, levels=prior_levels,
+                colors=CORNER_PRIOR_COLOR,
+                linewidths=np.linspace(.8, 1.1, len(prior_levels)),
+                linestyles=["--", "-"][-len(prior_levels):], alpha=.6,
+            )
+
+
+def _draw_best_fit(ax, x, y):
+    """Profile best fit in a joint panel: dashed crosshair lines and a marker.
+
+    The lines continue the dashed best-fit line of the marginal panels, so
+    the best fit can be read against every axis of every panel.
+    """
+    ax.axvline(x, color=CORNER_BEST_FIT_COLOR, ls="--", lw=.8, zorder=3)
+    ax.axhline(y, color=CORNER_BEST_FIT_COLOR, ls="--", lw=.8, zorder=3)
+    ax.plot(x, y, "D", color=CORNER_BEST_FIT_COLOR, markeredgecolor="white",
+            markeredgewidth=.4, markersize=3.5, zorder=4)
+
+
+def _corner_legend_handles(any_prior):
+    handles = [
+        Patch(facecolor=CORNER_68_FILL, label="Posterior 68%"),
+        Patch(facecolor=CORNER_95_FILL, label="Posterior 95%"),
+        Line2D([], [], color=CORNER_BEST_FIT_COLOR, marker="D", ls="none",
+               markersize=4.5, label="Profile best fit"),
+    ]
+    if any_prior:
+        handles.extend([
+            Line2D([], [], color=CORNER_PRIOR_COLOR, lw=1.1, ls="-", alpha=.6,
+                   label="Prior 68%"),
+            Line2D([], [], color=CORNER_PRIOR_COLOR, lw=.9, ls="--", alpha=.6,
+                   label="Prior 95%"),
+        ])
+    return handles
+
+
 @mpl.rc_context(PUBLICATION_FONT_RC)
 def plot_corner(result, bins=35, show_all_coefficients=False,
                 show_prior=False, prior_mask=None, axis_names=None,
-                axis_ranges=None):
+                axis_ranges=None, smoothing=None):
     """Joint physical posterior, restricted to independent coefficients by default.
+
+    The full triangle: marginals on the diagonal (no titles; the intervals
+    are in the fit's summary table; after the first they are drawn sideways
+    so each row's best-fit line runs through its marginal, as in the
+    nuisance grid), joint 68% and 95% regions below it, the
+    prior overlaid where ``prior_mask`` allows (its contours reflected at
+    hard bounds like the posterior), and the profile best fit as a dashed
+    crosshair with a marker. Up to four parameters it is a
+    one-column figure; beyond that it is drawn at the full text width for
+    the supplement. :func:`plot_physical_nuisance_grid` is the compact form
+    for the main text.
 
     ``axis_ranges`` optionally maps a parameter name (as in ``result["names"]``,
     e.g. ``"M_A [GeV]"`` or ``"a1"``) to a fixed ``(low, high)`` display range,
     so panels for that parameter share one x/y range across fits and suites.
     Parameters absent from the mapping keep their automatic, sample-derived
-    range. Pass ``None`` (the default) to fix no parameter's range.
+    range; hard-bounded knobs always show exactly their bounds. ``smoothing``
+    overrides the kernel-width factor from :func:`_smoothing_factor`.
     """
-    # Nested blue regions follow the visual convention of the reference
-    # corner plot: darker for 68%, lighter for 95%, without outline contours.
-    posterior_color = "#0072C1"
-    contour68_fill = "#7FB8DF"
-    contour95_fill = "#BFDBEF"
-    best_fit_color = "#000000"
-    prior_color = "#D62728"
     samples, names, indices = _diagnostic_view(result, show_all_coefficients)
     if axis_names is None:
         axis_names = names
@@ -1187,20 +1520,14 @@ def plot_corner(result, bins=35, show_all_coefficients=False,
             )
         prior_mask &= bool(show_prior)
     any_prior = bool(np.any(prior_mask))
-    figure_width = max(CORNER_REFERENCE_WIDTH, 1.75 * n)
-    font_scale = figure_width / CORNER_REFERENCE_WIDTH
+    if smoothing is None:
+        smoothing = _smoothing_factor(result)
+    bounds = [NUISANCE_BOUNDS.get(name) for name in names]
+    figure_width, placed_width = _corner_layout(n)
+    fonts = column_font_sizes(figure_width, placed_width)
     fig, axes = plt.subplots(n, n, figsize=(figure_width, figure_width),
                              squeeze=False)
-    ranges = []
-    for i in range(n):
-        if axis_ranges is not None and names[i] in axis_ranges:
-            ranges.append(tuple(axis_ranges[names[i]]))
-            continue
-        range_samples = (np.r_[samples[:, i], prior_samples[:, i]]
-                         if prior_mask[i] else samples[:, i])
-        low, high = range_samples.min(), range_samples.max()
-        padding = .03 * (high - low) if high > low else .5
-        ranges.append((low - padding, high + padding))
+    ranges = _display_ranges(names, samples, prior_samples, prior_mask, axis_ranges)
 
     for row in range(n):
         for col in range(n):
@@ -1209,136 +1536,68 @@ def plot_corner(result, bins=35, show_all_coefficients=False,
                 ax.set_visible(False)
                 continue
             if row == col:
-                centers, density = _smooth_density(samples[:, col], bins)
-                ax.plot(centers, density, color=posterior_color, lw=1.8)
-                if prior_mask[col]:
-                    prior_centers, prior_density = _smooth_density(
-                        prior_samples[:, col], bins
-                    )
-                    ax.plot(prior_centers, prior_density, color=prior_color,
-                            lw=1.2, alpha=.6)
-                ax.axvline(profile[col], color=best_fit_color, ls="--", lw=1.5)
-                q16, median, q84 = _quantile(
-                    samples[:, col], [.16, .50, .84]
+                # The first diagonal panel heads its column; every later one ends
+                # its row of joint panels, so it is drawn sideways (parameter on
+                # the y axis) and the row's dashed best-fit line runs straight
+                # through it, as in plot_physical_nuisance_grid.
+                sideways = row > 0
+                _draw_marginal(
+                    ax, samples[:, col], prior_samples[:, col], profile[col],
+                    bins, bounds[col], smoothing, prior_mask[col],
+                    vertical=sideways,
                 )
-                central, minus, plus = _format_interval(
-                    median, median - q16, q84 - median
-                )
-                if names[col].startswith("a"):
-                    parameter = rf"a_{{{names[col][1:]}}}"
-                elif names[col] == "M_A [GeV]":
-                    parameter = r"M_{A}\,[\mathrm{GeV}]"
-                elif names[col].endswith(" pull"):
-                    base = names[col].removesuffix(" pull").replace(" ", r"\ ")
-                    parameter = rf"\mathrm{{{base}}}\ \mathrm{{pull}}"
+                if sideways:
+                    ax.set_ylim(ranges[row])
+                    ax.set_xlim(left=0)
+                    ax.set_xticks([])
                 else:
-                    parameter = names[col]
-                interval = (rf"{central}\pm{plus}" if minus == plus else
-                            rf"{central}_{{-{minus}}}^{{+{plus}}}")
-                ax.set_title(
-                    rf"${parameter}={interval}$",
-                    fontsize=9, pad=6,
-                )
-                ax.set_yticks([])
+                    ax.set_yticks([])
             else:
-                x_range, x_bins = _panel_binning(
-                    ranges[col], samples[:, col], bins)
-                y_range, y_bins = _panel_binning(
-                    ranges[row], samples[:, row], bins)
-                histogram, xedges, yedges = np.histogram2d(
-                    samples[:, col], samples[:, row], bins=[x_bins, y_bins],
-                    range=[x_range, y_range],
+                prior = ((prior_samples[:, col], prior_samples[:, row])
+                         if prior_mask[col] and prior_mask[row] else None)
+                _draw_joint_panel(
+                    ax, samples[:, col], samples[:, row], ranges[col], ranges[row],
+                    bounds[col], bounds[row], bins, smoothing, prior,
                 )
-                histogram = _smooth_density_2d(histogram)
-                levels = _credible_density_levels(histogram)
-                if levels:
-                    xgrid, ygrid, density = _density_grid_to_edges(
-                        xedges, yedges, histogram
-                    )
-                    upper = np.nextafter(density.max(), np.inf)
-                    if len(levels) == 2:
-                        ax.contourf(
-                            xgrid, ygrid, density.T,
-                            levels=[levels[0], levels[1], upper],
-                            colors=[contour95_fill, contour68_fill],
-                        )
-                    else:
-                        ax.contourf(
-                            xgrid, ygrid, density.T,
-                            levels=[levels[0], upper], colors=[contour68_fill],
-                        )
-                if prior_mask[col] and prior_mask[row]:
-                    prior_x_range, prior_x_bins = _panel_binning(
-                        ranges[col], prior_samples[:, col], bins)
-                    prior_y_range, prior_y_bins = _panel_binning(
-                        ranges[row], prior_samples[:, row], bins)
-                    prior_histogram, prior_xedges, prior_yedges = np.histogram2d(
-                        prior_samples[:, col], prior_samples[:, row],
-                        bins=[prior_x_bins, prior_y_bins],
-                        range=[prior_x_range, prior_y_range],
-                    )
-                    prior_histogram = _smooth_density_2d(prior_histogram)
-                    prior_levels = _credible_density_levels(prior_histogram)
-                    if prior_levels:
-                        prior_xgrid, prior_ygrid, prior_density = (
-                            _density_grid_to_edges(
-                                prior_xedges, prior_yedges, prior_histogram
-                            )
-                        )
-                        ax.contour(
-                            prior_xgrid, prior_ygrid, prior_density.T,
-                            levels=prior_levels, colors=prior_color,
-                            linewidths=np.linspace(.9, 1.3, len(prior_levels)),
-                            linestyles=["--", "-"][-len(prior_levels):], alpha=.6,
-                        )
-                ax.plot(profile[col], profile[row],
-                        "D", color=best_fit_color, markeredgecolor="white",
-                        markeredgewidth=.5, markersize=5, zorder=4)
+                _draw_best_fit(ax, profile[col], profile[row])
                 ax.set_ylim(ranges[row])
-
-            ax.set_xlim(ranges[col])
-            _style_corner_ticks(ax, x_only=row == col)
-
-            if row == n - 1:
-                ax.set_xlabel(_parameter_label(axis_names[col]))
+            sideways_marginal = row == col and row > 0
+            if not sideways_marginal:
+                ax.set_xlim(ranges[col])
+            if row == col == 0:
+                _style_corner_ticks(ax, x_only=True, x_bounds=bounds[col])
+            elif sideways_marginal:
+                _style_corner_ticks(ax, y_bounds=bounds[row])
+                ax.set_xticks([])
             else:
+                _style_corner_ticks(ax, x_bounds=bounds[col], y_bounds=bounds[row])
+            if row == n - 1 and not sideways_marginal:
+                ax.set_xlabel(_parameter_label(axis_names[col]),
+                              fontsize=fonts["label"])
+            elif not sideways_marginal:
                 ax.set_xticklabels([])
             if col == 0 and row > 0:
-                ax.set_ylabel(_parameter_label(axis_names[row]))
+                ax.set_ylabel(_parameter_label(axis_names[row]),
+                              fontsize=fonts["label"])
             elif col > 0:
                 ax.set_yticklabels([])
-            ax.tick_params(labelsize=7)
+            ax.tick_params(labelsize=fonts["tick"])
 
-    legend_handles = [
-        Patch(facecolor=contour68_fill, label="Posterior 68%"),
-        Patch(facecolor=contour95_fill, label="Posterior 95%"),
-        Line2D([], [], color=best_fit_color, marker="D", ls="none", markersize=6,
-               label="Profile best fit"),
-    ]
-    if any_prior:
-        legend_handles.extend([
-            Line2D([], [], color=prior_color, lw=1.3, ls="-", alpha=.6,
-                   label="Prior 68%"),
-            Line2D([], [], color=prior_color, lw=1.0, ls="--", alpha=.6,
-                   label="Prior 95%"),
-        ])
-    # Lay out the corner grid first, then put the legend in the otherwise unused
-    # upper triangle. Keeping it out of the layout prevents it from shrinking the
-    # diagonal panel beside it.
-    # Scale after all axes text exists but before layout, so tight_layout uses
-    # the compensated sizes. At 0.5\linewidth these render identically to the
-    # fonts in the two-parameter (4-inch) reference corner.
-    _scale_figure_fonts(fig, font_scale)
-    fig.tight_layout(pad=.35)
+    # Lay out the corner grid first, then put the legend in the otherwise
+    # unused upper triangle, beside the first diagonal panel. Keeping it out
+    # of the layout prevents it from shrinking the panel beside it.
+    fig.tight_layout(pad=.3)
+    handles = _corner_legend_handles(any_prior)
+    if n == 1:
+        axes[0, 0].legend(handles=handles, loc="upper right",
+                          fontsize=fonts["legend"], frameon=False,
+                          labelspacing=.45, handlelength=1.8, handletextpad=.55)
+        return fig
     top_diagonal = axes[0, 0].get_position()
-    # Four-parameter corners have enough unused upper-triangle space to move
-    # the legend one panel farther right, clear of the second diagonal title.
-    legend_x = (axes[0, 2].get_position().x0 + .015 if n == 4
-                else top_diagonal.x1 + .012)
     legend = fig.legend(
-        handles=legend_handles, loc="upper left",
-        bbox_to_anchor=(legend_x, top_diagonal.y1),
-        ncol=1, fontsize=7.5 * font_scale, frameon=False,
+        handles=handles, loc="upper left",
+        bbox_to_anchor=(axes[0, 1].get_position().x0 + .01, top_diagonal.y1),
+        ncol=1, fontsize=fonts["legend"], frameon=False,
         labelspacing=.45, handlelength=1.8, handletextpad=.55,
         borderaxespad=0,
     )
@@ -1346,23 +1605,42 @@ def plot_corner(result, bins=35, show_all_coefficients=False,
     return fig
 
 
-@mpl.rc_context(PUBLICATION_FONT_RC)
+def _joint_view(result):
+    """Physical parameters and floated knobs of one fit as one joint view.
+
+    Returns ``(samples, prior_samples, profile, names, n_physical)``: the
+    M_A fits contribute M_A, the ``*_nuisance`` z-expansion fits their free
+    coefficients, each followed by the knobs in :data:`NUISANCE_LABELS` order.
+    """
+    if "ma_joint_samples" in result:
+        return (result["ma_joint_samples"], result["ma_joint_prior_samples"],
+                result["ma_joint_profile"], list(result["ma_joint_names"]), 1)
+    if "zexp_nuisance_samples" in result:
+        return (result["zexp_nuisance_samples"],
+                result["zexp_nuisance_prior_samples"],
+                result["zexp_nuisance_profile"],
+                list(result["zexp_nuisance_names"]), len(result["joint_names"]))
+    raise ValueError(f"{result['spec'].key!r} floats no modeling knobs")
+
+
+def _joint_result(result):
+    """``result`` re-pointed at its joint view, for :func:`plot_corner`."""
+    samples, prior_samples, profile, names, _ = _joint_view(result)
+    joint = dict(result)
+    joint.update(
+        samples=samples, prior_samples=prior_samples, profile=profile,
+        names=names, joint_samples=samples, joint_names=names,
+        joint_indices=np.arange(len(names)),
+    )
+    return joint
+
+
 def plot_ma_nuisance_corner(result, bins=35, show_prior=False,
                             show_ma_prior=True, axis_ranges=None):
-    """Joint posterior of physical M_A and its fitted cross-section nuisances."""
-    joint = dict(result)
+    """Full corner of physical M_A and its fitted cross-section nuisances."""
     n = len(result["ma_joint_names"])
-    joint.update(
-        samples=result["ma_joint_samples"],
-        prior_samples=result["ma_joint_prior_samples"],
-        profile=result["ma_joint_profile"],
-        names=result["ma_joint_names"],
-        joint_samples=result["ma_joint_samples"],
-        joint_names=result["ma_joint_names"],
-        joint_indices=np.arange(n),
-    )
     return plot_corner(
-        joint, bins=bins, show_prior=show_prior,
+        _joint_result(result), bins=bins, show_prior=show_prior,
         prior_mask=[show_ma_prior] + [True] * (n - 1),
         axis_ranges=axis_ranges,
     )
@@ -1370,36 +1648,179 @@ def plot_ma_nuisance_corner(result, bins=35, show_prior=False,
 
 def plot_zexp_nuisance_corner(result, bins=35, show_prior=False,
                               show_zexp_prior=True, axis_ranges=None):
-    """Joint posterior of physical z coefficients and fitted nuisances.
+    """Full corner of the physical z coefficients and fitted nuisances.
 
     ``show_zexp_prior=False`` suppresses the prior overlay on the z-expansion
     coefficients while keeping it on the nuisance parameters; use this for
     uniform-prior fits, whose synthetic ``prior_samples`` only exist to set
     axis ranges and do not represent a prior that entered the fit.
     """
-    joint = dict(result)
     n = len(result["zexp_nuisance_names"])
     n_axial = len(result["joint_names"])
-    joint.update(
-        samples=result["zexp_nuisance_samples"],
-        prior_samples=result["zexp_nuisance_prior_samples"],
-        profile=result["zexp_nuisance_profile"],
-        names=result["zexp_nuisance_names"],
-        joint_samples=result["zexp_nuisance_samples"],
-        joint_names=result["zexp_nuisance_names"],
-        joint_indices=np.arange(n),
-    )
-    axis_names = [
-        name.removesuffix(" pull") if name in {
-            "NormCCMEC pull", "RPA CCQE pull"
-        } else name
-        for name in result["zexp_nuisance_names"]
-    ]
     return plot_corner(
-        joint, bins=bins, show_prior=show_prior, axis_names=axis_names,
+        _joint_result(result), bins=bins, show_prior=show_prior,
         prior_mask=[show_zexp_prior] * n_axial + [True] * (n - n_axial),
         axis_ranges=axis_ranges,
     )
+
+
+@mpl.rc_context(PUBLICATION_FONT_RC)
+def plot_physical_nuisance_grid(result, bins=35, show_prior=True,
+                                show_physical_prior=True, axis_ranges=None,
+                                smoothing=None, figure_width=TEXT_WIDTH,
+                                placed_width=TEXT_WIDTH):
+    """Compact joint view: the physical parameters against every floated knob.
+
+    Rows are the physical parameters (M_A, or the free z-expansion
+    coefficients), columns the knobs. The top row holds each knob's marginal
+    posterior with its prior, the right column the physical marginals, and
+    the inner panels the joint 68% and 95% credible regions with the profile
+    best fit (dashed crosshair and marker). Knob-knob panels are left out:
+    their posterior correlations stay below 0.15 in every fit, so they only
+    repeat the prior;
+    :func:`plot_posterior_correlation` gives the numbers. This is the
+    main-text figure, drawn at the full text width (``figure*``);
+    :func:`plot_corner` keeps the full triangle for the supplement.
+
+    ``show_physical_prior=False`` drops the prior from the physical marginals
+    and from the joint panels (uniform-prior fits). ``axis_ranges`` and
+    ``smoothing`` behave as in :func:`plot_corner`.
+    """
+    samples, prior_samples, profile, names, n_physical = _joint_view(result)
+    n_knobs = len(names) - n_physical
+    if n_knobs == 0:
+        raise ValueError(f"{result['spec'].key!r} floats no modeling knobs")
+    if smoothing is None:
+        smoothing = _smoothing_factor(result)
+    physical = list(range(n_physical))
+    knobs = list(range(n_physical, len(names)))
+    bounds = [NUISANCE_BOUNDS.get(name) for name in names]
+    prior_mask = np.array(
+        [show_prior and show_physical_prior] * n_physical
+        + [show_prior] * n_knobs
+    )
+    ranges = _display_ranges(names, samples, prior_samples, prior_mask, axis_ranges)
+
+    fonts = column_font_sizes(figure_width, placed_width)
+    # The marginal strips are shorter than the joint panels; the right column
+    # is a little wider than the top row is tall so that the legend fits in
+    # the unused top-right slot.
+    marginal_height, marginal_width = .6, .9
+    n_rows, n_cols = n_physical + 1, n_knobs + 1
+    panel = figure_width / (n_knobs + marginal_width)
+    figure_height = panel * (n_physical + marginal_height) + .35
+    fig, axes = plt.subplots(
+        n_rows, n_cols, figsize=(figure_width, figure_height), squeeze=False,
+        gridspec_kw={
+            "height_ratios": [marginal_height] + [1] * n_physical,
+            "width_ratios": [1] * n_knobs + [marginal_width],
+        },
+    )
+
+    for j, k in enumerate(knobs):
+        ax = axes[0, j]
+        _draw_marginal(
+            ax, samples[:, k], prior_samples[:, k], profile[k], bins,
+            bounds[k], smoothing, prior_mask[k],
+        )
+        ax.set_xlim(ranges[k])
+        ax.set_yticks([])
+        _style_corner_ticks(ax, x_only=True, x_bounds=bounds[k])
+        ax.set_xticklabels([])
+    axes[0, n_knobs].set_visible(False)
+
+    for i, p in enumerate(physical):
+        for j, k in enumerate(knobs):
+            ax = axes[i + 1, j]
+            prior = ((prior_samples[:, k], prior_samples[:, p])
+                     if prior_mask[k] and prior_mask[p] else None)
+            _draw_joint_panel(
+                ax, samples[:, k], samples[:, p], ranges[k], ranges[p],
+                bounds[k], bounds[p], bins, smoothing, prior,
+            )
+            _draw_best_fit(ax, profile[k], profile[p])
+            ax.set_xlim(ranges[k])
+            ax.set_ylim(ranges[p])
+            _style_corner_ticks(ax, x_bounds=bounds[k], y_bounds=bounds[p])
+            if i == n_physical - 1:
+                ax.set_xlabel(_parameter_label(names[k]), fontsize=fonts["label"])
+            else:
+                ax.set_xticklabels([])
+            if j == 0:
+                ax.set_ylabel(_parameter_label(names[p]), fontsize=fonts["label"])
+            else:
+                ax.set_yticklabels([])
+            ax.tick_params(labelsize=fonts["tick"])
+        ax = axes[i + 1, n_knobs]
+        _draw_marginal(
+            ax, samples[:, p], prior_samples[:, p], profile[p], bins,
+            bounds[p], smoothing, prior_mask[p], vertical=True,
+        )
+        ax.set_ylim(ranges[p])
+        ax.set_xlim(left=0)
+        _style_corner_ticks(ax, y_bounds=bounds[p])
+        ax.set_xticks([])
+        ax.set_yticklabels([])
+        ax.tick_params(labelsize=fonts["tick"])
+
+    # Lay out the panels first, then put the legend in the unused top-right
+    # slot so it does not shrink the panels around it.
+    fig.tight_layout(pad=.3)
+    slot = axes[0, n_knobs].get_position()
+    fig.legend(
+        handles=_corner_legend_handles(bool(np.any(prior_mask))),
+        loc="upper right", bbox_to_anchor=(slot.x1, slot.y1),
+        ncol=1, fontsize=fonts["legend"], frameon=False,
+        labelspacing=.4, handlelength=1.3, handletextpad=.5, borderaxespad=0,
+    )
+    return fig
+
+
+@mpl.rc_context(PUBLICATION_FONT_RC)
+def plot_posterior_correlation(result, figure_width=COLUMN_WIDTH,
+                               placed_width=COLUMN_WIDTH):
+    """Posterior correlation matrix of the joint view, one number per pair.
+
+    Replaces the knob-knob panels of the full corner. Only the strictly lower
+    triangle is drawn (rows from the second parameter, columns to the
+    second-to-last), physical parameters first, on a diverging
+    red-white-blue scale.
+    """
+    samples, _, _, names, _ = _joint_view(result)
+    correlation = np.atleast_2d(np.corrcoef(samples, rowvar=False))
+    n = len(names)
+    if n < 2:
+        raise ValueError("a correlation matrix needs at least two parameters")
+    # Row i of the drawing is parameter i + 1, column j is parameter j.
+    lower = correlation[1:, :-1]
+    hidden = np.triu(np.ones((n - 1, n - 1), dtype=bool), k=1)
+    shown = np.ma.array(lower, mask=hidden)
+    fonts = column_font_sizes(figure_width, placed_width)
+    fig, ax = plt.subplots(figsize=(figure_width, figure_width * .9))
+    colormap = mpl.colormaps["RdBu_r"].copy()
+    colormap.set_bad("white")
+    image = ax.imshow(shown, cmap=colormap, vmin=-1, vmax=1)
+    for i in range(n - 1):
+        for j in range(i + 1):
+            value = lower[i, j]
+            if abs(value) < .005:
+                value = 0.0
+            ax.text(j, i, f"{value:.2f}".replace("0.", "."),
+                    ha="center", va="center", fontsize=fonts["tick"],
+                    color="white" if abs(value) > .6 else "black")
+    labels = [_parameter_label(name) for name in names]
+    ax.set_xticks(range(n - 1), labels[:-1], rotation=45, ha="right",
+                  rotation_mode="anchor", fontsize=fonts["tick"])
+    ax.set_yticks(range(n - 1), labels[1:], fontsize=fonts["tick"])
+    ax.tick_params(length=0)
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+    colorbar = fig.colorbar(image, ax=ax, fraction=.046, pad=.04)
+    colorbar.set_label("Posterior correlation", fontsize=fonts["label"])
+    colorbar.ax.tick_params(labelsize=fonts["tick"])
+    colorbar.outline.set_visible(False)
+    fig.tight_layout(pad=.3)
+    return fig
 
 
 def plot_fit(result, bins=45, axis_ranges=None):
@@ -1734,9 +2155,14 @@ def run_suite(suite, burn_in=0, thin=1, n_prior=50_000,
         print(f'\n{spec.title}\n{result["root_file"]}')
         n_retained = len(result["samples"])
         print(f"Retained posterior samples after burn-in/thinning: {n_retained:,}")
-        if n_retained < 20_000:
-            print("WARNING: fewer than 20,000 retained posterior samples; "
-                  "also check effective sample size and convergence.")
+        times = result["autocorrelation_times"]
+        slowest = max(times, key=times.get)
+        print(f"Integrated autocorrelation time: {times[slowest]:.1f} steps "
+              f"({slowest}); effective samples: {result['ess_min']:,.0f}")
+        if result["ess_min"] < SMOOTHING_REFERENCE_ESS:
+            print(f"WARNING: fewer than {SMOOTHING_REFERENCE_ESS:,.0f} effective "
+                  "samples; the densities are drawn with a wider kernel. Run a "
+                  "longer chain (MCMC_ITERATIONS) rather than thinning.")
         if ("AxFFCCQEshape_UBGenie" in spec.chain_branches
                 and np.any(result["ma_joint_samples"][:, 1] < 0)):
             print("WARNING: this ROOT chain contains AxFFCCQEshape values below 0 "
@@ -1808,5 +2234,28 @@ def run_suite(suite, burn_in=0, thin=1, n_prior=50_000,
                 )
                 print("Saved:", ", ".join(str(path) for path in paths))
             display(nuisance_figure)
+            plt.close()
+        if spec.prior is None or spec.nuisance_branches:
+            grid_figure = plot_physical_nuisance_grid(
+                result, show_prior=show_prior_in_corner,
+                show_physical_prior=not spec.uniform_prior,
+                axis_ranges=axis_ranges,
+            )
+            if save_figures:
+                paths = _save_figure(
+                    grid_figure, suite, spec.key, "physical_nuisance_grid",
+                    output_dir, save_dpi, save_formats,
+                )
+                print("Saved:", ", ".join(str(path) for path in paths))
+            display(grid_figure)
+            plt.close()
+            correlation_figure = plot_posterior_correlation(result)
+            if save_figures:
+                paths = _save_figure(
+                    correlation_figure, suite, spec.key, "posterior_correlation",
+                    output_dir, save_dpi, save_formats,
+                )
+                print("Saved:", ", ".join(str(path) for path in paths))
+            display(correlation_figure)
             plt.close()
     return results

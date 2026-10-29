@@ -14,6 +14,8 @@ nthreads="${NTHREADS:-8}"
 max_jobs="${JOBS:-4}"
 stages="${STAGES:-profile}"
 baseline_stages="${BASELINE_STAGES:-profile}"
+mcmc_iterations="${MCMC_ITERATIONS:-}"
+mcmc_burnin="${MCMC_BURNIN:-}"
 dry_run="${DRY_RUN:-0}"
 manifest="${script_dir}/runs.txt"
 
@@ -46,6 +48,8 @@ Environment:
                               adopts a lower minimum than the global fit found (needed: the
                               global stage alone got stuck in a local minimum, 2026-09-30)
   BASELINE_STAGES=profile     Stages for the baselines (profile gives the F_A uncertainties)
+  MCMC_ITERATIONS, MCMC_BURNIN  Chain length / burn-in of the profile stage (PROfit defaults 20000 / 25000);
+                              the appendix figures use MCMC_ITERATIONS=500000 like the production fits
   OUTPUT_ROOT, PROFIT_BIN, DRY_RUN behave as in xml/run_all.sh.
 USAGE
 }
@@ -133,8 +137,13 @@ run_profit() {
     # run_profit <dir> <xml> <tag> <output> <log> <stage> [extra global args...]
     local dir="$1" xml="$2" tag="$3" output="$4" log="$5" stage="$6"
     shift 6
+    local chain_args=()
+    if [[ "${stage}" == "profile" ]]; then
+        [[ -n "${mcmc_iterations}" ]] && chain_args+=(--fit-options MCMC-Iterations "${mcmc_iterations}")
+        [[ -n "${mcmc_burnin}" ]] && chain_args+=(--fit-options MCMC-Burnin "${mcmc_burnin}")
+    fi
     local cmd=("${profit_bin}" --xml "${xml}" --tag "${tag}" --output "${output}"
-               --nthread "${nthreads}" --log "${log}" "$@" "${stage}")
+               --nthread "${nthreads}" --log "${log}" "$@" "${chain_args[@]}" "${stage}")
     if [[ "${dry_run}" == "1" ]]; then
         printf '(cd %q &&' "${dir}"
         printf ' %q' "${cmd[@]}"

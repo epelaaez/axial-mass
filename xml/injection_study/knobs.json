@@ -1,11 +1,12 @@
 {
  "_meta": {
-  "generated": "2026-10-03",
+  "generated": "2026-10-18",
   "notebook": "python/notebooks/19_modeling_knob_screen.ipynb",
   "variant": "count50",
   "base_fits": [
    "ma",
-   "lqcd_k6"
+   "lqcd_k6",
+   "minerva_k6"
   ],
   "rule": "inject every knob with max |1 sigma shift| >= 0.01 in some base fit"
  },

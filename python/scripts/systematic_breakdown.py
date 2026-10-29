@@ -21,7 +21,7 @@ SYST_GROUPS = {
     "Flux": ("Flux", "piprod"),
     "Hadron reinteraction": ("Reint",),
     "Detector": ("DetVar",),
-    "POT & targets": ("norm",),
+    "POT and targets": ("norm",),
     "MC statistics": ("other",),
 }
 
