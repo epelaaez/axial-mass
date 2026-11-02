@@ -1335,12 +1335,13 @@ def plot_ma_posterior_overlay(results,
 
 
 # Shared drawing conventions of the corner-style figures: nested blue regions
-# (darker 68%, lighter 95%, no outline), the prior in red, the profile best
-# fit in black.
+# (darker 68%, lighter 95%, no outline), the prior in red, the marginal
+# posterior median in black. The text quotes the median and central 68%
+# interval, so the figures mark those and not the profile best fit.
 CORNER_POSTERIOR_COLOR = "#0072C1"
 CORNER_68_FILL = "#7FB8DF"
 CORNER_95_FILL = "#BFDBEF"
-CORNER_BEST_FIT_COLOR = "#000000"
+CORNER_MEDIAN_COLOR = "#000000"
 CORNER_PRIOR_COLOR = "#D62728"
 
 
@@ -1375,11 +1376,20 @@ def _display_ranges(names, samples, prior_samples, prior_mask, axis_ranges):
     return ranges
 
 
-def _draw_marginal(ax, samples, prior_samples, best_fit, bins, bounds,
+def _draw_marginal(ax, samples, prior_samples, bins, bounds,
                    smoothing, show_prior, vertical=False):
-    """Posterior (and prior) density line with the best-fit marker line."""
+    """Posterior (and prior) density line, the central 68% interval shaded
+    under the posterior and the median as a dashed segment up to the curve."""
     centers, density = _smooth_density(samples, bins, bounds=bounds,
                                        smoothing=smoothing)
+    q16, median, q84 = _quantile(samples, [.16, .50, .84])
+    inside = np.linspace(q16, q84, 200)
+    inside_density = np.interp(inside, centers, density)
+    median_density = np.interp(median, centers, density)
+    fill = ax.fill_betweenx if vertical else ax.fill_between
+    fill(inside, 0, inside_density, color=CORNER_68_FILL, lw=0)
+    segment = ax.hlines if vertical else ax.vlines
+    segment(median, 0, median_density, color=CORNER_MEDIAN_COLOR, ls="--", lw=1.0)
     curves = [(centers, density, CORNER_POSTERIOR_COLOR, 1.4, 1.0)]
     if show_prior:
         prior_centers, prior_density = _smooth_density(
@@ -1391,8 +1401,6 @@ def _draw_marginal(ax, samples, prior_samples, best_fit, bins, bounds,
             ax.plot(density, centers, color=color, lw=lw, alpha=alpha)
         else:
             ax.plot(centers, density, color=color, lw=lw, alpha=alpha)
-    line = ax.axhline if vertical else ax.axvline
-    line(best_fit, color=CORNER_BEST_FIT_COLOR, ls="--", lw=1.0)
 
 
 def _draw_joint_panel(ax, x, y, x_range, y_range, x_bounds, y_bounds, bins,
@@ -1449,24 +1457,23 @@ def _draw_joint_panel(ax, x, y, x_range, y_range, x_bounds, y_bounds, bins,
             )
 
 
-def _draw_best_fit(ax, x, y):
-    """Profile best fit in a joint panel: dashed crosshair lines and a marker.
+def _draw_median_lines(ax, x, y):
+    """Marginal posterior medians in a joint panel, as dashed lines.
 
-    The lines continue the dashed best-fit line of the marginal panels, so
-    the best fit can be read against every axis of every panel.
+    The lines continue the dashed median line of the marginal panels, so each
+    median can be read against every panel. No marker: the pair of marginal
+    medians is not a point estimate of the joint posterior.
     """
-    ax.axvline(x, color=CORNER_BEST_FIT_COLOR, ls="--", lw=.8, zorder=3)
-    ax.axhline(y, color=CORNER_BEST_FIT_COLOR, ls="--", lw=.8, zorder=3)
-    ax.plot(x, y, "D", color=CORNER_BEST_FIT_COLOR, markeredgecolor="white",
-            markeredgewidth=.4, markersize=3.5, zorder=4)
+    ax.axvline(x, color=CORNER_MEDIAN_COLOR, ls="--", lw=.8, zorder=3)
+    ax.axhline(y, color=CORNER_MEDIAN_COLOR, ls="--", lw=.8, zorder=3)
 
 
 def _corner_legend_handles(any_prior):
     handles = [
         Patch(facecolor=CORNER_68_FILL, label="Posterior 68%"),
         Patch(facecolor=CORNER_95_FILL, label="Posterior 95%"),
-        Line2D([], [], color=CORNER_BEST_FIT_COLOR, marker="D", ls="none",
-               markersize=4.5, label="Profile best fit"),
+        Line2D([], [], color=CORNER_MEDIAN_COLOR, ls="--", lw=1.0,
+               label="Posterior median"),
     ]
     if any_prior:
         handles.extend([
@@ -1486,11 +1493,12 @@ def plot_corner(result, bins=35, show_all_coefficients=False,
 
     The full triangle: marginals on the diagonal (no titles; the intervals
     are in the fit's summary table; after the first they are drawn sideways
-    so each row's best-fit line runs through its marginal, as in the
+    so each row's median line runs through its marginal, as in the
     nuisance grid), joint 68% and 95% regions below it, the
     prior overlaid where ``prior_mask`` allows (its contours reflected at
-    hard bounds like the posterior), and the profile best fit as a dashed
-    crosshair with a marker. Up to four parameters it is a
+    hard bounds like the posterior), and the marginal posterior medians as
+    dashed lines with the central 68% interval shaded under each marginal.
+    Up to four parameters it is a
     one-column figure; beyond that it is drawn at the full text width for
     the supplement. :func:`plot_physical_nuisance_grid` is the compact form
     for the main text.
@@ -1508,7 +1516,7 @@ def plot_corner(result, bins=35, show_all_coefficients=False,
     elif len(axis_names) != len(names):
         raise ValueError("axis_names must contain one label per plotted parameter")
     prior_samples = result["prior_samples"][:, indices]
-    profile = result["profile"][indices]
+    medians = _quantile(samples, .5)
     n = len(names)
     if prior_mask is None:
         prior_mask = np.full(n, bool(show_prior), dtype=bool)
@@ -1538,11 +1546,11 @@ def plot_corner(result, bins=35, show_all_coefficients=False,
             if row == col:
                 # The first diagonal panel heads its column; every later one ends
                 # its row of joint panels, so it is drawn sideways (parameter on
-                # the y axis) and the row's dashed best-fit line runs straight
+                # the y axis) and the row's dashed median line runs straight
                 # through it, as in plot_physical_nuisance_grid.
                 sideways = row > 0
                 _draw_marginal(
-                    ax, samples[:, col], prior_samples[:, col], profile[col],
+                    ax, samples[:, col], prior_samples[:, col],
                     bins, bounds[col], smoothing, prior_mask[col],
                     vertical=sideways,
                 )
@@ -1559,7 +1567,7 @@ def plot_corner(result, bins=35, show_all_coefficients=False,
                     ax, samples[:, col], samples[:, row], ranges[col], ranges[row],
                     bounds[col], bounds[row], bins, smoothing, prior,
                 )
-                _draw_best_fit(ax, profile[col], profile[row])
+                _draw_median_lines(ax, medians[col], medians[row])
                 ax.set_ylim(ranges[row])
             sideways_marginal = row == col and row > 0
             if not sideways_marginal:
@@ -1674,8 +1682,8 @@ def plot_physical_nuisance_grid(result, bins=35, show_prior=True,
     Rows are the physical parameters (M_A, or the free z-expansion
     coefficients), columns the knobs. The top row holds each knob's marginal
     posterior with its prior, the right column the physical marginals, and
-    the inner panels the joint 68% and 95% credible regions with the profile
-    best fit (dashed crosshair and marker). Knob-knob panels are left out:
+    the inner panels the joint 68% and 95% credible regions with the
+    marginal posterior medians (dashed lines). Knob-knob panels are left out:
     their posterior correlations stay below 0.15 in every fit, so they only
     repeat the prior;
     :func:`plot_posterior_correlation` gives the numbers. This is the
@@ -1686,7 +1694,8 @@ def plot_physical_nuisance_grid(result, bins=35, show_prior=True,
     and from the joint panels (uniform-prior fits). ``axis_ranges`` and
     ``smoothing`` behave as in :func:`plot_corner`.
     """
-    samples, prior_samples, profile, names, n_physical = _joint_view(result)
+    samples, prior_samples, _, names, n_physical = _joint_view(result)
+    medians = _quantile(samples, .5)
     n_knobs = len(names) - n_physical
     if n_knobs == 0:
         raise ValueError(f"{result['spec'].key!r} floats no modeling knobs")
@@ -1720,7 +1729,7 @@ def plot_physical_nuisance_grid(result, bins=35, show_prior=True,
     for j, k in enumerate(knobs):
         ax = axes[0, j]
         _draw_marginal(
-            ax, samples[:, k], prior_samples[:, k], profile[k], bins,
+            ax, samples[:, k], prior_samples[:, k], bins,
             bounds[k], smoothing, prior_mask[k],
         )
         ax.set_xlim(ranges[k])
@@ -1738,7 +1747,7 @@ def plot_physical_nuisance_grid(result, bins=35, show_prior=True,
                 ax, samples[:, k], samples[:, p], ranges[k], ranges[p],
                 bounds[k], bounds[p], bins, smoothing, prior,
             )
-            _draw_best_fit(ax, profile[k], profile[p])
+            _draw_median_lines(ax, medians[k], medians[p])
             ax.set_xlim(ranges[k])
             ax.set_ylim(ranges[p])
             _style_corner_ticks(ax, x_bounds=bounds[k], y_bounds=bounds[p])
@@ -1753,7 +1762,7 @@ def plot_physical_nuisance_grid(result, bins=35, show_prior=True,
             ax.tick_params(labelsize=fonts["tick"])
         ax = axes[i + 1, n_knobs]
         _draw_marginal(
-            ax, samples[:, p], prior_samples[:, p], profile[p], bins,
+            ax, samples[:, p], prior_samples[:, p], bins,
             bounds[p], smoothing, prior_mask[p], vertical=True,
         )
         ax.set_ylim(ranges[p])
@@ -1844,7 +1853,8 @@ def plot_fit(result, bins=45, axis_ranges=None):
                  histtype="step", color="C3", lw=1.4, label="Prior")
         top.hist(result["samples"][:, i], edges, density=True,
                  histtype="stepfilled", color="C0", alpha=.4, label="Posterior")
-        top.axvline(result["profile"][i], color="k", ls="--", label="Best fit")
+        median = _quantile(result["samples"][:, i], .5)
+        top.axvline(median, color="k", ls="--", label="Posterior median")
         top.axvspan(result["q16"][i], result["q84"][i], color="C1", alpha=.18,
                     label="68% interval")
         top.set_title(_parameter_label(name))
@@ -1856,7 +1866,7 @@ def plot_fit(result, bins=45, axis_ranges=None):
                         fmt="o", color="C3", capsize=2)
         lo, hi = result["q16"][i], result["q84"][i]
         bottom.hlines(0, lo, hi, color="C0", linewidth=2)
-        bottom.plot(result["profile"][i], 0, "D", color="C0", markersize=5)
+        bottom.plot(median, 0, "D", color="C0", markersize=5)
         bottom.set_yticks([0, 1], ["Posterior", "Prior"] if i == 0 else ["", ""])
         bottom.grid(axis="x", alpha=.25)
         bottom.set_ylim(-.6, 1.6)
@@ -2130,6 +2140,139 @@ def plot_fa_summary(results, show=None, comparison_prior=None,
     return fig
 
 
+def plot_fa_tension(results, posterior="minerva_k6_uniform", reference="lqcd_k6",
+                    context_priors=("minerva_k6",), q2_range=(0.01, 2.0),
+                    highlight=(0.05, 0.5), n_q2=301, max_samples=50_000,
+                    figure_width=COLUMN_WIDTH, placed_width=COLUMN_WIDTH):
+    """One posterior against one external prior, as F_A, ratio and pull.
+
+    The top panel draws ``-F_A`` for ``posterior`` and the priors of
+    ``reference`` and ``context_priors`` (median and 68% band).  The middle
+    panel divides everything by the ``reference`` prior median, and the bottom
+    panel shows the pointwise displacement
+    ``(posterior median - reference median) / sigma_post``, with ``sigma_post``
+    the half-width of the posterior 68% interval at each Q^2.  ``highlight``
+    shades a Q^2 window in the lower two panels (``None`` disables it).
+    Returns the figure and a DataFrame of the ratio and pull on the grid.
+    """
+    q2 = np.geomspace(*q2_range, n_q2)
+
+    def bands(key, use_prior):
+        curves = -_fa_curves(results[key], q2, use_prior=use_prior,
+                             max_samples=max_samples)
+        return _quantile(curves, [.16, .50, .84])
+
+    post_low, post_median, post_high = bands(posterior, False)
+    ref_low, ref_median, ref_high = bands(reference, True)
+    pull = (post_median - ref_median) / ((post_high - post_low) / 2)
+
+    fonts = column_font_sizes(figure_width, placed_width)
+    with mpl.rc_context(column_font_rc(figure_width, placed_width)):
+        fig, (ax, ratio, pull_axis) = plt.subplots(
+            3, 1, figsize=(figure_width, figure_width * 1.42), sharex=True,
+            gridspec_kw={"height_ratios": (2.1, 1, 1), "hspace": .07},
+        )
+        handles, labels = [], []
+
+        def draw_prior(key, low, median, high, zorder):
+            color = FA_SOURCE_COLORS.get(key, "0.3")
+            face = to_rgba(color, .18)
+            for axis, scale in ((ax, 1), (ratio, ref_median)):
+                axis.fill_between(q2, low / scale, high / scale, facecolor=face,
+                                  edgecolor=color, linewidth=.3, hatch="////",
+                                  zorder=zorder)
+                axis.plot(q2, median / scale, color=color, lw=1.1,
+                          zorder=zorder + .5)
+            handles.append((Patch(facecolor=face, edgecolor=color,
+                                  hatch="////", linewidth=.3),
+                            Line2D([], [], color=color, lw=1.1)))
+            labels.append(prior_label(results[key]["spec"]))
+
+        for i, key in enumerate(context_priors):
+            draw_prior(key, *bands(key, True), zorder=1 + i)
+        draw_prior(reference, ref_low, ref_median, ref_high,
+                   zorder=2 + len(context_priors))
+
+        color = FA_SOURCE_COLORS.get(posterior, "C0")
+        for axis, scale in ((ax, 1), (ratio, ref_median)):
+            axis.fill_between(q2, post_low / scale, post_high / scale,
+                              color=color, alpha=.25, linewidth=0, zorder=5)
+            axis.plot(q2, post_median / scale, color=color, lw=1.6, zorder=6)
+        handles.append((Patch(facecolor=to_rgba(color, .25), edgecolor="none"),
+                        Line2D([], [], color=color, lw=1.6)))
+        labels.append(format_posterior_label(results[posterior]["spec"].source,
+                                             _spec_kmax(results[posterior]["spec"])))
+
+        # Pull panel: shaded 1 and 2 sigma reference bands behind the curve.
+        pull_axis.axhspan(-2, 2, color="0.5", alpha=.08, linewidth=0, zorder=0)
+        pull_axis.axhspan(-1, 1, color="0.5", alpha=.14, linewidth=0, zorder=0)
+        pull_axis.plot(q2, pull, color=color, lw=1.6, zorder=3)
+        for axis in (ratio, pull_axis):
+            axis.axhline(1 if axis is ratio else 0, color="0.35", lw=.8,
+                         ls=(0, (2, 2)), zorder=-1)
+            if highlight is not None:
+                axis.axvspan(*highlight, color="#E69F00", alpha=.10,
+                             linewidth=0, zorder=-2)
+
+        ax.set_ylabel(r"$-F_A(Q^2)$")
+        ratio.set_ylabel(f"Ratio to\n{results[reference]['spec'].source}")
+        pull_axis.set_ylabel(r"$\Delta/\sigma_{\rm post}$")
+        pull_axis.set_xlabel(r"$Q^2$ [GeV$^2$]")
+        pull_axis.set_xscale("log")
+        pull_axis.set_xlim(q2_range)
+        ticks = [t for t in (0.01, 0.05, 0.1, 0.5, 1.0, 2.0)
+                 if q2_range[0] <= t <= q2_range[1]]
+        pull_axis.set_xticks(ticks, labels=[f"{t:g}" for t in ticks])
+        ax.set_ylim(bottom=0)
+        ratio.set_ylim(.35, 1.65)
+        pull_limit = max(3.2, np.ceil(np.abs(pull).max() * 2 + .5) / 2)
+        pull_axis.set_ylim(-pull_limit, pull_limit)
+        pull_axis.yaxis.set_major_locator(MaxNLocator(5, integer=True))
+        for axis in (ax, ratio, pull_axis):
+            axis.tick_params(direction="in", top=True, right=True, which="both")
+            axis.yaxis.set_minor_locator(AutoMinorLocator())
+        ax.legend(handles, labels, handler_map={tuple: HandlerTuple(ndivide=1)},
+                  frameon=False, fontsize=fonts["legend"], loc="lower left",
+                  handlelength=2.4)
+        fig.align_ylabels()
+
+    table = pd.DataFrame({
+        "Q2": q2, "posterior_median": post_median,
+        "posterior_sigma": (post_high - post_low) / 2,
+        "reference_median": ref_median, "ratio": post_median / ref_median,
+        "pull": pull,
+    })
+    return fig, table
+
+
+def nuisance_summary(result):
+    """Best fit and posterior summary of the floated modeling knobs, in fit (pull)
+    coordinates, laid out like ``result["summary"]``. ``None`` for fits without them."""
+    if "ma_joint_samples" in result:
+        samples, profile, names = (
+            result["ma_joint_samples"], result["ma_joint_profile"], result["ma_joint_names"]
+        )
+    elif "zexp_nuisance_samples" in result:
+        samples, profile, names = (
+            result["zexp_nuisance_samples"], result["zexp_nuisance_profile"],
+            result["zexp_nuisance_names"],
+        )
+    else:
+        return None
+    n_physical = len(result["joint_names"])
+    samples, profile, names = samples[:, n_physical:], profile[n_physical:], names[n_physical:]
+    if not names:
+        return None
+    q16, median, q84 = _quantile(samples, [0.16, 0.50, 0.84])
+    summary = pd.DataFrame({
+        "profile_best_fit": profile, "posterior_mean": samples.mean(axis=0),
+        "posterior_sigma": samples.std(axis=0), "posterior_median": median,
+        "q16": q16, "q84": q84, "minus_1sigma": median - q16, "plus_1sigma": q84 - median,
+    }, index=names)
+    summary.index.name = "knob"
+    return summary
+
+
 def run_suite(suite, burn_in=0, thin=1, n_prior=50_000,
               show_all_coefficients=False, show_prior_in_corner=False,
               save_figures=True, output_dir=FIGURE_ROOT, save_dpi=600,
@@ -2168,6 +2311,11 @@ def run_suite(suite, burn_in=0, thin=1, n_prior=50_000,
             print("WARNING: this ROOT chain contains AxFFCCQEshape values below 0 "
                   "and predates the XML restrict=\"0, 1\" setting; rerun the fit.")
         display(result["summary"].round(5))
+        nuisances = nuisance_summary(result)
+        if nuisances is not None:
+            print("Interaction-modeling knobs, in pull units (the [0, 1] switches are "
+                  "the fraction of the way to the alternative model)")
+            display(nuisances.round(3))
         diagnostic_samples, diagnostic_names, _ = _diagnostic_view(
             result, show_all_coefficients
         )
