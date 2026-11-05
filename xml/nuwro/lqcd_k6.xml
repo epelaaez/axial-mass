@@ -60,21 +60,35 @@
 	</branch>
 </MCFile>
 
-<!-- Weighted mixture of the preliminary Run 4b and Run 5 detector variations. -->
+<!-- Detector variations in two CV groups (uboone_ngem df_helpers.detvar_weight_col, 2026-11-04 dataframes):
+     LY and WireMod are matched against the main CV (runs 1, 3 with the 3b 1mil sample, and 5), SCE and
+     Recomb2 against the CV of the 3b 500k sample (runs 1, 3 and 5). Within a section the CV keys
+     (filetype_code, run, subrun, event) are unique; filetype_code separates nu_overlay from nue_overlay.
+     WireModThetaYZ has no run 3 sample; the Recomb2 run 5 sample has 65 % of the CV POT. -->
 <DetVarFiles>
-	<DetVarSection treename="tree" include_only_weights="1" extra_weight="net_weight" cv_variation_matching_vars="detvar_sample,run,subrun,event">
+	<DetVarSection treename="tree" include_only_weights="1" extra_weight="net_weight" cv_variation_matching_vars="filetype_code,run,subrun,event">
 
 		<cv filename="/nevis/riverside/data/epelaez/ngem/intermediate_files/minimal_detvar_CV_df.root" pot="1" />
 
-		<variation name="Recomb2" filename="/nevis/riverside/data/epelaez/ngem/intermediate_files/minimal_detvar_Recomb2_df.root" pot="1" />
 		<variation name="LYAtt" filename="/nevis/riverside/data/epelaez/ngem/intermediate_files/minimal_detvar_LYAtt_df.root" pot="1" />
 		<variation name="LYDown" filename="/nevis/riverside/data/epelaez/ngem/intermediate_files/minimal_detvar_LYDown_df.root" pot="1" />
 		<variation name="LYRayleigh" filename="/nevis/riverside/data/epelaez/ngem/intermediate_files/minimal_detvar_LYRayleigh_df.root" pot="1" />
-		<variation name="SCE" filename="/nevis/riverside/data/epelaez/ngem/intermediate_files/minimal_detvar_SCE_df.root" pot="1" />
 		<variation name="WireModX" filename="/nevis/riverside/data/epelaez/ngem/intermediate_files/minimal_detvar_WireModX_df.root" pot="1" />
 		<variation name="WireModYZ" filename="/nevis/riverside/data/epelaez/ngem/intermediate_files/minimal_detvar_WireModYZ_df.root" pot="1" />
 		<variation name="WireModThetaXZ" filename="/nevis/riverside/data/epelaez/ngem/intermediate_files/minimal_detvar_WireModThetaXZ_df.root" pot="1" />
 		<variation name="WireModThetaYZ" filename="/nevis/riverside/data/epelaez/ngem/intermediate_files/minimal_detvar_WireModThetaYZ_df.root" pot="1" />
+
+		<subchannel>nu_uBooNE_numuCC1p_numuCC1poverlay</subchannel>
+		<subchannel>nu_uBooNE_numuCC1p_nonnumuCC1poverlay</subchannel>
+
+	</DetVarSection>
+
+	<DetVarSection treename="tree" include_only_weights="1" extra_weight="net_weight" cv_variation_matching_vars="filetype_code,run,subrun,event">
+
+		<cv filename="/nevis/riverside/data/epelaez/ngem/intermediate_files/minimal_detvar_CV_sce_recomb2_df.root" pot="1" />
+
+		<variation name="Recomb2" filename="/nevis/riverside/data/epelaez/ngem/intermediate_files/minimal_detvar_Recomb2_df.root" pot="1" />
+		<variation name="SCE" filename="/nevis/riverside/data/epelaez/ngem/intermediate_files/minimal_detvar_SCE_df.root" pot="1" />
 
 		<subchannel>nu_uBooNE_numuCC1p_numuCC1poverlay</subchannel>
 		<subchannel>nu_uBooNE_numuCC1p_nonnumuCC1poverlay</subchannel>

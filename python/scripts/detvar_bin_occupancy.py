@@ -6,18 +6,20 @@ production XMLs (xml/opendata, count50) points to and applies the same selection
 binning as the MCFile branches: afro_1mu1p_sel == 1, reco log10(Q^2) x p_n on the
 9 x 8 grid, events outside the grid dropped; signal / background is afro_1mu1p_true.
 
-Each variation only covers some of the CV run periods (the LY ones Run 1, Run 3b and
-Run 5; SCE, Recomb2 and WireMod only Run 5), so every variation is compared with the
-CV events from the (filetype, detvar_sample, run period) groups it actually has. Per
-bin and variation the table gives
+The variations come in two CV groups (uboone_ngem df_helpers.detvar_weight_col): LY and
+WireMod are matched against minimal_detvar_CV_df.root (runs 1, 3 with the 3b 1mil sample,
+and 5), SCE and Recomb2 against minimal_detvar_CV_sce_recomb2_df.root (the 3b 500k
+sample). A variation may still miss a run period of its CV (WireModThetaYZ has no run 3
+sample), so every variation is compared with the CV events of its own group from the
+(filetype, run period) groups it actually has. Per bin and variation the table gives
     n_var        selected events in the variation sample (raw, unweighted)
     n_cv         selected events in the matching CV subset (raw)
     n_matched    variation events whose run/subrun/event is also selected in the CV
                  subset; this is what PROfit's event-matched DetVar ratio uses
     neff_var     (sum w)^2 / sum w^2 of the variation, the effective count after the
                  per-run-period POT weights
-and the same split into signal and background. The CV sample appears as its own row
-(all periods).
+and the same split into signal and background. The two CV samples appear as their own
+rows (all periods).
 
 Writes tables/detvar_bin_occupancy/{detvar_bin_occupancy.csv, run_period_summary.csv}
 and figs/detvar_bin_occupancy.pdf:
@@ -37,8 +39,11 @@ INPUT_DIR = Path("/nevis/riverside/data/epelaez/ngem/intermediate_files")
 TABLE_DIR = REPO_ROOT / "tables" / "detvar_bin_occupancy"
 FIGURE = REPO_ROOT / "figs" / "detvar_bin_occupancy.pdf"
 
-VARIATIONS = ["Recomb2", "LYAtt", "LYDown", "LYRayleigh", "SCE",
-              "WireModX", "WireModYZ", "WireModThetaXZ", "WireModThetaYZ"]
+VARIATIONS = ["LYAtt", "LYDown", "LYRayleigh",
+              "WireModX", "WireModYZ", "WireModThetaXZ", "WireModThetaYZ", "Recomb2", "SCE"]
+# DetVar CV group of each variation: the CV file its events are matched against.
+CV_OF = {v: ("CV_sce_recomb2" if v in ("Recomb2", "SCE") else "CV") for v in VARIATIONS}
+CV_NAMES = ["CV", "CV_sce_recomb2"]
 # Production reco binning (xml/opendata, count50).
 Q2_LOG_EDGES = np.array([-2.00, -1.16, -0.94, -0.80, -0.68, -0.57, -0.47, -0.34, -0.25, 0.20])
 PN_EDGES = np.array([0.00, 0.125, 0.175, 0.25, 0.30, 0.40, 0.525, 0.625, 1.00])
@@ -48,8 +53,8 @@ LOW_COUNT = 50
 # First run of each MicroBooNE run period.
 RUN_PERIOD_STARTS = [(4952, "Run 1"), (8317, "Run 2"), (13697, "Run 3"), (18961, "Run 4a"),
                      (19753, "Run 4b"), (21286, "Run 4c"), (22270, "Run 4d"), (24320, "Run 5")]
-KEY = ["detvar_sample", "run", "subrun", "event"]
-COLUMNS = KEY + ["filetype", "afro_1mu1p_sel", "afro_1mu1p_true", "afro_1mu1p_Q2",
+KEY = ["filetype", "run", "subrun", "event"]
+COLUMNS = KEY + ["afro_1mu1p_sel", "afro_1mu1p_true", "afro_1mu1p_Q2",
                  "afro_1mu1p_Pn", "net_weight"]
 
 
@@ -89,18 +94,20 @@ def per_bin(df, prefix):
 
 
 def main():
-    cv = load("CV")
-    groups = ["filetype", "detvar_sample", "period"]
+    cvs = {name: load(name) for name in CV_NAMES}
+    groups = ["filetype", "period"]
     rows, period_rows = [], []
 
-    cv_table = per_bin(cv, "var").reset_index()
-    cv_table.insert(0, "variation", "CV")
-    rows.append(cv_table)
-    for (ft, ds, per), sub in cv.groupby(groups):
-        period_rows.append(dict(variation="CV", filetype=ft, detvar_sample=ds, period=per, n_selected=len(sub)))
+    for name, cv in cvs.items():
+        cv_table = per_bin(cv, "var").reset_index()
+        cv_table.insert(0, "variation", name)
+        rows.append(cv_table)
+        for (ft, per), sub in cv.groupby(groups):
+            period_rows.append(dict(variation=name, cv=name, filetype=ft, period=per, n_selected=len(sub)))
 
     for name in VARIATIONS:
         var = load(name)
+        cv = cvs[CV_OF[name]]
         covered = var[groups].drop_duplicates()
         cv_sub = cv.merge(covered, on=groups)
         matched = var.merge(cv_sub[KEY], on=KEY)
@@ -109,9 +116,9 @@ def main():
         table = table.reset_index()
         table.insert(0, "variation", name)
         rows.append(table)
-        for (ft, ds, per), sub in var.groupby(groups):
-            n_cv = len(cv_sub[(cv_sub.filetype == ft) & (cv_sub.detvar_sample == ds) & (cv_sub.period == per)])
-            period_rows.append(dict(variation=name, filetype=ft, detvar_sample=ds, period=per,
+        for (ft, per), sub in var.groupby(groups):
+            n_cv = len(cv_sub[(cv_sub.filetype == ft) & (cv_sub.period == per)])
+            period_rows.append(dict(variation=name, cv=CV_OF[name], filetype=ft, period=per,
                                     n_selected=len(sub), n_cv_selected=n_cv))
 
     table = pd.concat(rows, ignore_index=True)
@@ -131,9 +138,11 @@ def main():
 
 
 def plot(table):
-    names = ["CV"] + VARIATIONS
-    fig, axes = plt.subplots(2, 5, figsize=(17, 7), sharex=True, sharey=True, constrained_layout=True)
+    names = ["CV"] + [v for v in VARIATIONS if CV_OF[v] == "CV"] + ["CV_sce_recomb2"] + [v for v in VARIATIONS if CV_OF[v] != "CV"]
+    fig, axes = plt.subplots(3, 4, figsize=(14, 10.5), sharex=True, sharey=True, constrained_layout=True)
     vmax = table["n_var"].max()
+    for ax in axes.flat[len(names):]:
+        ax.set_visible(False)
     for ax, name in zip(axes.flat, names):
         sub = table[table["variation"] == name]
         counts = np.zeros((len(Q2_LOG_EDGES) - 1, len(PN_EDGES) - 1))
