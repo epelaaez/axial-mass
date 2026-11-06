@@ -15,3 +15,6 @@ xml_testing/
 
 # Backups 
 *.gz
+
+# console logs of the PROfit runners
+logs/
