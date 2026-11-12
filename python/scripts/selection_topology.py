@@ -9,7 +9,8 @@ muons >= 0.1 GeV/c, protons >= 0.3 GeV/c, charged pions >= 0.07 GeV/c, every pi0
 other meson. The signal flag rebuilt here is checked against afro_1mu1p_true.
 
 Output: tables/selection_topology.parquet, one row per selected prediction MC event
-(nu, nue, NC pi0, numu CC pi0 and dirt overlays) keyed by (filename, run, subrun, event):
+(nu, nue, NC pi0, numu CC pi0, dirt, NC Delta radiative, numu CC radiative-correction and NC
+coherent single-photon samples) keyed by (filename, run, subrun, event):
 the particle counts, the leading muon and proton momenta and the ``topology`` label used by
 5_publication_plots.ipynb. Takes a few minutes (reads ~10 M events from ~30 files).
 
@@ -38,7 +39,8 @@ ALL_DF = Path(intermediate_files_location) / "all_df.parquet"
 RAW_DIR = Path(data_files_location)
 OUTPUT = REPO_ROOT / "tables" / "selection_topology.parquet"
 PREDICTION_MC_FILETYPES = ["nu_overlay", "nue_overlay", "nc_pi0_overlay", "numucc_pi0_overlay",
-                           "dirt_overlay"]
+                           "dirt_overlay", "ncdeltarad_overlay", "numucc_rad_corr_sim",
+                           "NC_coherent_1g_reweighted"]
 KEYS = ["filename", "run", "subrun", "event"]
 
 # Stack categories, in stacking order. Each selected prediction event gets exactly one.

@@ -35,7 +35,8 @@ ALL_DF = Path("/nevis/riverside/data/epelaez/ngem/intermediate_files/all_df.parq
 WEIGHT = "wc_net_weight_open_data"
 # File types that make up the PROfit prediction (save_PROfit_rootfiles_zexp.build_minimal_df).
 PREDICTION_FILETYPES = ["nu_overlay", "nue_overlay", "nc_pi0_overlay", "numucc_pi0_overlay",
-                        "dirt_overlay", "ext"]
+                        "dirt_overlay", "ncdeltarad_overlay", "numucc_rad_corr_sim",
+                        "NC_coherent_1g_reweighted", "ext"]
 # Production reco binning (xml/opendata, count50), reused for the true-bin efficiency.
 Q2_LOG_EDGES = np.array([-2.00, -1.16, -0.94, -0.80, -0.68, -0.57, -0.47, -0.34, -0.25, 0.20])
 PN_EDGES = np.array([0.00, 0.125, 0.175, 0.25, 0.30, 0.40, 0.525, 0.625, 1.00])
