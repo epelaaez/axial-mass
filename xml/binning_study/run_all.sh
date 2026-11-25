@@ -12,7 +12,7 @@ set -euo pipefail
 script_dir="${STUDY_DIR:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)}"
 study_name="${STUDY_NAME:-$(basename -- "${script_dir}")}"
 generator="${STUDY_GENERATOR:-python/scripts/make_${study_name}_xmls.py}"
-output_root="${OUTPUT_ROOT:-/nevis/hopper/data/epelaez/axial_mass}"
+output_root="${OUTPUT_ROOT:-/nevis/hopper/data/epelaez/axial_mass_cnpmu_iterfrozen}"
 study_output="${output_root}/${study_name}_fit_results"
 profit_bin="${PROFIT_BIN:-/nevis/riverside/share/epelaez/PROfit/build/bin/PROfit}"
 nthreads="${NTHREADS:-8}"
@@ -23,7 +23,7 @@ plot_with_covar="${PLOT_WITH_COVAR:-0}"
 fit_name="${FIT:-}"
 variant_name="${VARIANTS:-}"
 family_name="${FAMILIES:-}"
-chi2="${CHI2:-}"
+chi2="${CHI2:-CNP}"
 mcmc_iterations="${MCMC_ITERATIONS:-}"
 mcmc_burnin="${MCMC_BURNIN:-}"
 max_jobs="${JOBS:-4}"
@@ -54,7 +54,16 @@ Environment:
   FAMILIES="nuwro asimov"       Same as repeated --family
   VARIANTS="count50 count10"    Same as repeated --variant
   FIT="minerva_k6 lqcd_k6"      Same as repeated --fit
-  CHI2=CNP                      Same as --chi2
+  CHI2=CNP                      Same as --chi2 (CNP is the default; another statistic adds
+                                _<chi2> to the family directory)
+  FROZEN_COV=1                  Pass --frozen-cov (M frozen at the CV); results go to
+                                <family>_frozencov
+  COV=iterfrozen                Default: profile stage with the covariance frozen at the
+                                iterated best fit (xml/iterate_frozen.sh; TOL, MAX_ITER).
+                                COV=dynamic rebuilds it at every point: <family>_dynamic
+  PLAIN_DIRS=1                  No suffix on the family directory whatever the statistic and
+                                covariance treatment: use it with a separate OUTPUT_ROOT (e.g. the
+                                Neyman / dynamic tree /nevis/hopper/data/epelaez/axial_mass)
   OUTPUT_ROOT, PROFIT_BIN, NTHREADS, STAGES, DRY_RUN, PLOT_WITH_SPLINES,
   MCMC_ITERATIONS, MCMC_BURNIN behave as in xml/run_all.sh.
   STUDY_DIR, STUDY_NAME               run another study tree with this runner (see the header)
@@ -208,13 +217,37 @@ if ((${#requested_variants[@]})); then
     variants=("${selected_variants[@]}")
 fi
 
-# The chi2 statistic: neyman is PROfit's default and keeps the plain family directory.
+# The analysis default (since 2026-11-24) is CNP with the iterated frozen covariance: that
+# combination keeps the plain <family> directory, anything else gets a suffix.
 chi2_args=()
 chi2_suffix=""
-if [[ -n "${chi2}" && "${chi2,,}" != "neyman" ]]; then
-    chi2_args=(--chi2 "${chi2}")
-    chi2_suffix="_${chi2,,}"
+[[ "${chi2,,}" != "neyman" ]] && chi2_args=(--chi2 "${chi2}")
+[[ "${chi2,,}" != "cnp" ]] && chi2_suffix="_${chi2,,}"
+# FROZEN_COV=1: PROfit --frozen-cov with the default reference (covariance held at the CV
+# prediction; PROfit develop >= 9e9d61c). Results go to <family>_frozencov. The 2026-11-18
+# <family>_fixedcov trees came from the superseded --fixed-cov-cv patch.
+if [[ "${FROZEN_COV:-0}" == "1" ]]; then
+    chi2_args+=(--frozen-cov)
+    chi2_suffix+="_frozencov"
 fi
+
+# COV=iterfrozen: the profile stage runs with --frozen-cov at the reference iterated by
+# xml/iterate_frozen.sh in the same output directory (default). COV=dynamic: covariance rebuilt
+# at every tested point, results go to <family>_dynamic. FROZEN_COV=1 without COV means dynamic
+# stages on top of --frozen-cov, as before.
+if [[ "${FROZEN_COV:-0}" == "1" ]]; then cov_mode="${COV:-dynamic}"; else cov_mode="${COV:-iterfrozen}"; fi
+if [[ "${cov_mode}" != "dynamic" && "${cov_mode}" != "iterfrozen" ]]; then
+    echo "Unknown COV=${cov_mode} (dynamic, iterfrozen)" >&2
+    exit 2
+fi
+if [[ "${FROZEN_COV:-0}" == "1" ]]; then
+    [[ "${cov_mode}" == "iterfrozen" ]] && chi2_suffix+="_iterfrozen"
+elif [[ "${cov_mode}" == "dynamic" ]]; then
+    chi2_suffix+="_dynamic"
+fi
+# PLAIN_DIRS=1: plain <family> directories whatever the statistic and covariance treatment.
+[[ "${PLAIN_DIRS:-0}" == "1" ]] && chi2_suffix=""
+iterate_script="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/../iterate_frozen.sh"
 
 if [[ ! -x "${profit_bin}" ]]; then
     echo "PROfit executable is not available: ${profit_bin}" >&2
@@ -289,12 +322,21 @@ run_profit_stage() {
         subcommand_args+=(--with-covar)
     fi
     if [[ "${stage}" == "profile" ]]; then
-        if [[ -n "${mcmc_iterations}" ]]; then
-            global_stage_args+=(--fit-options MCMC-Iterations "${mcmc_iterations}")
-        fi
-        if [[ -n "${mcmc_burnin}" ]]; then
-            global_stage_args+=(--fit-options MCMC-Burnin "${mcmc_burnin}")
-        fi
+        # --mcmc-correlations: PROfit develop >= 9e9d61c writes the _mcmc_chain TTree (read by every
+        # post-fit notebook) and the post-fit correlation matrix only with this flag.
+        subcommand_args+=(--mcmc-correlations)
+        # One --fit-options flag: the search fix of xml/iterate_frozen.sh plus the chain settings.
+        fit_options=(latin_phys_only 0)
+        [[ -n "${mcmc_iterations}" ]] && fit_options+=(MCMC-Iterations "${mcmc_iterations}")
+        [[ -n "${mcmc_burnin}" ]] && fit_options+=(MCMC-Burnin "${mcmc_burnin}")
+        global_stage_args+=(--seed "${PROFIT_SEED:-1}" --fit-options "${fit_options[@]}")
+    fi
+    local iterated=0
+    if [[ "${stage}" == "profile" && "${cov_mode}" == "iterfrozen" ]]; then
+        iterated=1
+        "${iterate_script}" "${fit_output}" "${fit}" "" \
+            "${profit_bin}" --xml "${xml}" --tag "${fit}" --nthread "${nthreads}" "${chi2_args[@]}" || return 1
+        global_stage_args+=(--frozen-cov --cov-reference-file "${fit_output}/${fit}_cov_reference.txt")
     fi
     local cmd=("${profit_bin}" --xml "${xml}" --tag "${fit}" --output v1 --nthread "${nthreads}"
                --log "${stage}.log" "${global_stage_args[@]}" "${stage}" "${subcommand_args[@]}")
@@ -305,7 +347,10 @@ run_profit_stage() {
         return 0
     fi
     # PROfit logs to --log; ROOT chatter and any crash output go to <stage>.out
-    (cd "${fit_output}" && "${cmd[@]}" > "${stage}.out" 2>&1)
+    (cd "${fit_output}" && "${cmd[@]}" > "${stage}.out" 2>&1) || return 1
+    if [[ "${iterated}" == "1" ]]; then
+        "${iterate_script}" --check "${fit_output}" "${fit}" "" v1
+    fi
 }
 
 run_fit() {
