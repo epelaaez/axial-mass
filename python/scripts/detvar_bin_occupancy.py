@@ -25,8 +25,16 @@ Writes tables/detvar_bin_occupancy/{detvar_bin_occupancy.csv, run_period_summary
 and figs/detvar_bin_occupancy.pdf:
 
     python python/scripts/detvar_bin_occupancy.py
+
+With --enu-min E (GeV) only events with true neutrino energy truth_nuEnergy > E are kept
+(applied before the selection, to CV and variations alike), and the outputs go to
+tables/detvar_bin_occupancy_enu_gt<E>GeV/ and figs/detvar_bin_occupancy_enu_gt<E>GeV.pdf
+so they sit next to the inclusive ones:
+
+    python python/scripts/detvar_bin_occupancy.py --enu-min 1
 """
 
+import argparse
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -55,7 +63,7 @@ RUN_PERIOD_STARTS = [(4952, "Run 1"), (8317, "Run 2"), (13697, "Run 3"), (18961,
                      (19753, "Run 4b"), (21286, "Run 4c"), (22270, "Run 4d"), (24320, "Run 5")]
 KEY = ["filetype", "run", "subrun", "event"]
 COLUMNS = KEY + ["afro_1mu1p_sel", "afro_1mu1p_true", "afro_1mu1p_Q2",
-                 "afro_1mu1p_Pn", "net_weight"]
+                 "afro_1mu1p_Pn", "net_weight", "truth_nuEnergy"]
 
 
 def run_period(run):
@@ -64,11 +72,13 @@ def run_period(run):
     return labels[np.searchsorted(starts, run, side="right") - 1]
 
 
-def load(name):
+def load(name, enu_min=None):
     arrays = uproot.open(INPUT_DIR / f"minimal_detvar_{name}_df.root")["tree"].arrays(COLUMNS, library="np")
     df = pd.DataFrame({k: v.astype(str) if v.dtype == object else v for k, v in arrays.items()})
     df["period"] = run_period(df["run"].to_numpy())
     df = df[df["afro_1mu1p_sel"] == 1].copy()
+    if enu_min is not None:
+        df = df[df["truth_nuEnergy"] > 1000.0 * enu_min]  # truth_nuEnergy is in MeV
     ix = np.digitize(np.log10(df["afro_1mu1p_Q2"]), Q2_LOG_EDGES) - 1
     iy = np.digitize(df["afro_1mu1p_Pn"], PN_EDGES) - 1
     inside = (ix >= 0) & (ix < len(Q2_LOG_EDGES) - 1) & (iy >= 0) & (iy < len(PN_EDGES) - 1)
@@ -93,8 +103,11 @@ def per_bin(df, prefix):
     return pd.DataFrame(out)
 
 
-def main():
-    cvs = {name: load(name) for name in CV_NAMES}
+def main(enu_min=None):
+    suffix = "" if enu_min is None else f"_enu_gt{enu_min:g}GeV"
+    table_dir = TABLE_DIR.with_name(TABLE_DIR.name + suffix)
+    figure = FIGURE.with_name(FIGURE.stem + suffix + FIGURE.suffix)
+    cvs = {name: load(name, enu_min) for name in CV_NAMES}
     groups = ["filetype", "period"]
     rows, period_rows = [], []
 
@@ -106,7 +119,7 @@ def main():
             period_rows.append(dict(variation=name, cv=name, filetype=ft, period=per, n_selected=len(sub)))
 
     for name in VARIATIONS:
-        var = load(name)
+        var = load(name, enu_min)
         cv = cvs[CV_OF[name]]
         covered = var[groups].drop_duplicates()
         cv_sub = cv.merge(covered, on=groups)
@@ -130,14 +143,14 @@ def main():
     int_cols = [c for c in table.columns if c.startswith("n_")]
     table[int_cols] = table[int_cols].fillna(-1).astype(int).replace(-1, pd.NA)
 
-    TABLE_DIR.mkdir(parents=True, exist_ok=True)
-    table.to_csv(TABLE_DIR / "detvar_bin_occupancy.csv", index=False, float_format="%.4g")
-    pd.DataFrame(period_rows).to_csv(TABLE_DIR / "run_period_summary.csv", index=False)
-    plot(table)
+    table_dir.mkdir(parents=True, exist_ok=True)
+    table.to_csv(table_dir / "detvar_bin_occupancy.csv", index=False, float_format="%.4g")
+    pd.DataFrame(period_rows).to_csv(table_dir / "run_period_summary.csv", index=False)
+    plot(table, figure, enu_min)
     return table
 
 
-def plot(table):
+def plot(table, figure=FIGURE, enu_min=None):
     names = ["CV"] + [v for v in VARIATIONS if CV_OF[v] == "CV"] + ["CV_sce_recomb2"] + [v for v in VARIATIONS if CV_OF[v] != "CV"]
     fig, axes = plt.subplots(3, 4, figsize=(14, 10.5), sharex=True, sharey=True, constrained_layout=True)
     vmax = table["n_var"].max()
@@ -162,11 +175,15 @@ def plot(table):
     for ax in axes[:, 0]:
         ax.set_ylabel(r"reco $p_n$ [GeV/c]")
     fig.colorbar(mesh, ax=axes, label="selected MC events (raw)", shrink=0.8)
-    fig.suptitle(f"Selected 1$\\mu$1p events, detector-variation samples "
+    cut = "" if enu_min is None else f", true $E_\\nu$ > {enu_min:g} GeV"
+    fig.suptitle(f"Selected 1$\\mu$1p events{cut}, detector-variation samples "
                  f"(red bold: < {LOW_COUNT})", fontsize=12)
-    FIGURE.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(FIGURE)
+    figure.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(figure)
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    parser.add_argument("--enu-min", type=float, default=None,
+                        help="keep only events with true E_nu above this value [GeV]")
+    main(parser.parse_args().enu_min)

@@ -13,6 +13,7 @@ which checks the two agree.)
 """
 
 from dataclasses import dataclass
+import os
 from pathlib import Path
 import sys
 
@@ -67,7 +68,10 @@ def _quantile(samples, quantiles):
                        method="hazen")
 
 
-DATA_ROOT = Path("/nevis/hopper/data/epelaez/axial_mass")
+# Main analysis outputs: CNP statistic with the iterated frozen covariance (since 2026-11-24).
+# The Neyman / dynamic-covariance tree is /nevis/hopper/data/epelaez/axial_mass; AXIAL_MASS_OUTPUT_ROOT
+# or load_fit(..., data_root=) reads another tree.
+DATA_ROOT = Path(os.environ.get("AXIAL_MASS_OUTPUT_ROOT", "/nevis/hopper/data/epelaez/axial_mass_cnpmu_iterfrozen"))
 FIGURE_ROOT = Path(__file__).resolve().parents[2] / "figs"
 # Fit outputs live at DATA_ROOT/<data dir>/<fit>/, written by xml/run_all.sh.
 # The on-disk directories are the run_all.sh suite names, so SUITE_DATA_DIRS is
@@ -139,8 +143,8 @@ REFERENCE_PRIORS = {
 # Standalone reference priors that have no fit of their own. The shared keys
 # minerva_k6, lqcd_k6, and minerva_lqcd_k6 take their legend text from SPECS.
 REFERENCE_SOURCES = {
-    "deuterium": ("Deuterium (2016)", 8),
-    "deuterium_k6": ("Deuterium (2025)", 6),
+    "deuterium": (r"$\nu$–D", 8),
+    "deuterium_k6": (r"$\nu$–D", 6),
 }
 
 # Native kmax=8 Deuterium result from Eqs. (31)--(33) of Meyer et al. (2016),
@@ -180,7 +184,7 @@ class FitSpec:
     nuisance_labels: tuple = ()
     nuisance_branches: tuple = ()
     uniform_prior: bool = False
-    # Legend text: ``source`` names the prior ("MINERvA (2026)", "uniform",
+    # Legend text: ``source`` names the prior ("$\bar{\nu}$–H", "uniform",
     # "Gaussian $M_A$"); ``variant`` distinguishes fits that share one prior.
     source: str = ""
     variant: str = ""
@@ -201,6 +205,11 @@ NUISANCE_DISPLAY_NAMES = {
     "MFP_N": "MFP N pull",
     "DecayAngMEC": "DecayAngMEC pull",
     "FrCEx_N": "FrCEx N pull",
+    # Floated only in the nuisance-ladder study (xml/nuisance_ladder_study).
+    "VecFFCCQEshape": "VecFFCCQEshape pull",
+    "FracPN_CCMEC": "FracPN CCMEC pull",
+    "xsr_scc_Fv3_SCC": "SCC Fv3 pull",
+    "FrAbs_N": "FrAbs N pull",
 }
 # Ranges the truncated standard-normal prior is drawn over: the two-point model switches
 # (AxFFCCQEshape, XSecShape_CCMEC, DecayAngMEC) are restricted to [0, 1] in the XMLs.
@@ -212,6 +221,10 @@ NUISANCE_PRIOR_RANGES = {
     "MFP_N": (-3, 3),
     "DecayAngMEC": (0, 1),
     "FrCEx_N": (-3, 3),
+    "VecFFCCQEshape": (0, 1),
+    "FracPN_CCMEC": (-3, 3),
+    "xsr_scc_Fv3_SCC": (-3, 3),
+    "FrAbs_N": (-3, 3),
 }
 # Short axis labels for the corner-style figures, keyed by the display names
 # above. The long "... pull" names stay the keys of every result array and of
@@ -225,6 +238,10 @@ NUISANCE_SHORT_LABELS = {
     "MFP N pull": r"MFP $N$",
     "DecayAngMEC pull": "MEC angle",
     "FrCEx N pull": r"FrCEx $N$",
+    "VecFFCCQEshape pull": "VecFF shape",
+    "FracPN CCMEC pull": r"MEC $pn$ frac.",
+    "SCC Fv3 pull": r"SCC $F_V^3$",
+    "FrAbs N pull": r"FrAbs $N$",
 }
 # Hard bounds (the XMLs' restrict=) of the two-point switches, keyed by display
 # name. Their densities (posterior and prior alike) are estimated on exactly
@@ -234,6 +251,7 @@ NUISANCE_BOUNDS = {
     "AxFFCCQEshape pull": (0, 1),
     "XSecShape CCMEC pull": (0, 1),
     "DecayAngMEC pull": (0, 1),
+    "VecFFCCQEshape pull": (0, 1),
 }
 
 
@@ -250,25 +268,25 @@ SPECS = (
             profile_labels=("MACCQE",) + NUISANCE_LABELS,
             chain_branches=("MaCCQE_UBGenie",) + NUISANCE_BRANCHES,
             uniform_prior=True),
-    FitSpec("lqcd_k6", r"LQCD (2026), $k_{\max}=6$", LQCD_K6_PRIOR,
-            source="LQCD (2026)"),
+    FitSpec("lqcd_k6", r"LQCD, $k_{\max}=6$", LQCD_K6_PRIOR,
+            source="LQCD"),
     FitSpec(
         "lqcd_k6_nuisance",
-        r"LQCD (2026), $k_{\max}=6$, fitted nuisances",
+        r"LQCD, $k_{\max}=6$, fitted nuisances",
         LQCD_K6_PRIOR,
-        source="LQCD (2026)", variant="fitted nuisances",
+        source="LQCD", variant="fitted nuisances",
         nuisance_labels=NUISANCE_LABELS,
         nuisance_branches=NUISANCE_BRANCHES,
     ),
-    FitSpec("lqcd_k7", r"LQCD (2026), $k_{\max}=7$", LQCD_K7_PRIOR,
-            source="LQCD (2026)"),
-    FitSpec("minerva_k6", r"MINERvA (2026), $k_{\max}=6$", MINERVA_K6_PRIOR,
-            source="MINERvA (2026)"),
+    FitSpec("lqcd_k7", r"LQCD, $k_{\max}=7$", LQCD_K7_PRIOR,
+            source="LQCD"),
+    FitSpec("minerva_k6", r"$\bar{\nu}$–H, $k_{\max}=6$", MINERVA_K6_PRIOR,
+            source=r"$\bar{\nu}$–H"),
     FitSpec(
         "minerva_k6_nuisance",
-        r"MINERvA (2026), $k_{\max}=6$, fitted nuisances",
+        r"$\bar{\nu}$–H, $k_{\max}=6$, fitted nuisances",
         MINERVA_K6_PRIOR,
-        source="MINERvA (2026)", variant="fitted nuisances",
+        source=r"$\bar{\nu}$–H", variant="fitted nuisances",
         nuisance_labels=NUISANCE_LABELS,
         nuisance_branches=NUISANCE_BRANCHES,
     ),
@@ -283,19 +301,19 @@ SPECS = (
         nuisance_labels=NUISANCE_LABELS,
         nuisance_branches=NUISANCE_BRANCHES,
     ),
-    FitSpec("minerva_k7", r"MINERvA (2026), $k_{\max}=7$", MINERVA_K7_PRIOR,
-            source="MINERvA (2026)"),
-    FitSpec("minerva_k8", r"MINERvA (2023), $k_{\max}=8$", MINERVA_LEGACY_PRIOR,
-            source="MINERvA (2023)"),
-    FitSpec("minerva_lqcd_k6", r"MINERvA + LQCD (2026), $k_{\max}=6$",
-            MINERVA_LQCD_K6_PRIOR, source="MINERvA + LQCD (2026)"),
-    FitSpec("minerva_lqcd_k7", r"MINERvA + LQCD (2026), $k_{\max}=7$",
-            MINERVA_LQCD_K7_PRIOR, source="MINERvA + LQCD (2026)"),
+    FitSpec("minerva_k7", r"$\bar{\nu}$–H, $k_{\max}=7$", MINERVA_K7_PRIOR,
+            source=r"$\bar{\nu}$–H"),
+    FitSpec("minerva_k8", r"$\bar{\nu}$–H, $k_{\max}=8$", MINERVA_LEGACY_PRIOR,
+            source=r"$\bar{\nu}$–H"),
+    FitSpec("minerva_lqcd_k6", r"$\bar{\nu}$–H + LQCD, $k_{\max}=6$",
+            MINERVA_LQCD_K6_PRIOR, source=r"$\bar{\nu}$–H + LQCD"),
+    FitSpec("minerva_lqcd_k7", r"$\bar{\nu}$–H + LQCD, $k_{\max}=7$",
+            MINERVA_LQCD_K7_PRIOR, source=r"$\bar{\nu}$–H + LQCD"),
     FitSpec(
         "minerva_lqcd_k6_nuisance",
-        r"MINERvA + LQCD (2026), $k_{\max}=6$, fitted nuisances",
+        r"$\bar{\nu}$–H + LQCD, $k_{\max}=6$, fitted nuisances",
         MINERVA_LQCD_K6_PRIOR,
-        source="MINERvA + LQCD (2026)", variant="fitted nuisances",
+        source=r"$\bar{\nu}$–H + LQCD", variant="fitted nuisances",
         nuisance_labels=NUISANCE_LABELS,
         nuisance_branches=NUISANCE_BRANCHES,
     ),
@@ -2242,6 +2260,126 @@ def plot_fa_tension(results, posterior="minerva_k6_uniform", reference="lqcd_k6"
         "reference_median": ref_median, "ratio": post_median / ref_median,
         "pull": pull,
     })
+    return fig, table
+
+
+# NuWro fake-data generator: dipole axial form factor with M_A = 1.03 GeV. The
+# normalization is the same F_A(0) as the dipole fits (_fa_curves), so the
+# ratio to the input isolates the Q^2 shape and M_A.
+NUWRO_INPUT_MA = 1.03
+
+# (key, legend label, color, line style) for plot_fa_vs_nuwro_input: the
+# post-fit F_A of one dipole fit, the prior-free z-expansion fit and the
+# LQCD-prior z-expansion fit.
+NUWRO_INPUT_FITS = (
+    ("ma", r"Post-fit, dipole, Gaussian $M_A$ prior", "#D55E00", "-"),
+    ("minerva_k6_uniform_nuisance",
+     r"Post-fit, $z$ exp., uniform prior, fitted nuisances", "#0072B2", "-"),
+    ("lqcd_k6", r"Post-fit, $z$ exp., LQCD prior", "#009E73", "-"),
+)
+
+
+def plot_fa_vs_nuwro_input(results, fits=NUWRO_INPUT_FITS, context_prior=None,
+                           input_ma=NUWRO_INPUT_MA, q2_range=(0.01, 2.0),
+                           highlight=(0.05, 0.5), n_q2=301, max_samples=50_000,
+                           figure_width=COLUMN_WIDTH, placed_width=COLUMN_WIDTH):
+    """Fake-data F_A posteriors against the form factor NuWro was generated with.
+
+    Top: post-fit ``-F_A`` for every fit in ``fits`` (median and 68% band)
+    and the NuWro input dipole (black); ``context_prior`` optionally adds one
+    fit's prior as a hatched band. Middle: everything divided
+    by the NuWro input. Bottom: ``(posterior median - input) / sigma_post`` with
+    ``sigma_post`` the half-width of the posterior 68% interval, as in
+    :func:`plot_fa_tension`. Returns the figure and a long-format DataFrame of
+    ratio and pull per fit on the Q^2 grid.
+    """
+    q2 = np.geomspace(*q2_range, n_q2)
+    truth = 1.2723 / (1 + q2 / input_ma**2) ** 2
+
+    def bands(key, use_prior=False):
+        curves = -_fa_curves(results[key], q2, use_prior=use_prior,
+                             max_samples=max_samples)
+        return _quantile(curves, [.16, .50, .84])
+
+    fonts = column_font_sizes(figure_width, placed_width)
+    rows = []
+    with mpl.rc_context(column_font_rc(figure_width, placed_width)):
+        fig, (ax, ratio, pull_axis) = plt.subplots(
+            3, 1, figsize=(figure_width, figure_width * 1.55), sharex=True,
+            gridspec_kw={"height_ratios": (1.8, 1.25, 1.1), "hspace": .07},
+        )
+        handles, labels = [], []
+
+        if context_prior is not None:
+            color = FA_SOURCE_COLORS.get(context_prior, "0.4")
+            face = to_rgba(color, .15)
+            low, median, high = bands(context_prior, use_prior=True)
+            for axis, scale in ((ax, 1), (ratio, truth)):
+                axis.fill_between(q2, low / scale, high / scale, facecolor=face,
+                                  edgecolor=color, linewidth=.3, hatch="////",
+                                  zorder=1)
+                axis.plot(q2, median / scale, color=color, lw=1.0, zorder=1.5)
+            handles.append((Patch(facecolor=face, edgecolor=color, hatch="////",
+                                  linewidth=.3),
+                            Line2D([], [], color=color, lw=1.0)))
+            labels.append(prior_label(results[context_prior]["spec"]))
+
+        for i, (key, label, color, style) in enumerate(fits):
+            low, median, high = bands(key)
+            sigma = (high - low) / 2
+            pull = (median - truth) / sigma
+            rows.append(pd.DataFrame({
+                "fit": key, "Q2": q2, "posterior_median": median,
+                "posterior_sigma": sigma, "input": truth,
+                "ratio": median / truth, "pull": pull,
+            }))
+            for axis, scale in ((ax, 1), (ratio, truth)):
+                axis.fill_between(q2, low / scale, high / scale, color=color,
+                                  alpha=.2, linewidth=0, zorder=3 + i)
+                axis.plot(q2, median / scale, color=color, lw=1.4, ls=style,
+                          zorder=10 + i)
+            pull_axis.plot(q2, pull, color=color, lw=1.4, ls=style, zorder=10 + i)
+            handles.append((Patch(facecolor=to_rgba(color, .2), edgecolor="none"),
+                            Line2D([], [], color=color, lw=1.4, ls=style)))
+            labels.append(label)
+
+        for axis, scale in ((ax, 1), (ratio, truth)):
+            axis.plot(q2, truth / scale, color="black", lw=1.8, zorder=20)
+        handles.insert(0, Line2D([], [], color="black", lw=1.8))
+        labels.insert(0, rf"NuWro input (dipole, $M_A={input_ma:g}$ GeV)")
+
+        pull_axis.axhspan(-2, 2, color="0.5", alpha=.08, linewidth=0, zorder=0)
+        pull_axis.axhspan(-1, 1, color="0.5", alpha=.14, linewidth=0, zorder=0)
+        pull_axis.axhline(0, color="black", lw=1.2, zorder=1)
+        if highlight is not None:
+            for axis in (ratio, pull_axis):
+                axis.axvspan(*highlight, color="0.5", alpha=.10, linewidth=0,
+                             zorder=-2)
+
+        ax.set_ylabel(r"$-F_A(Q^2)$")
+        ratio.set_ylabel("Ratio to\nNuWro input")
+        pull_axis.set_ylabel(r"$(F_A^{\rm post}-F_A^{\rm in})/\sigma_{\rm post}$")
+        pull_axis.set_xlabel(r"$Q^2$ [GeV$^2$]")
+        pull_axis.set_xscale("log")
+        pull_axis.set_xlim(q2_range)
+        ticks = [t for t in (0.01, 0.05, 0.1, 0.5, 1.0, 2.0)
+                 if q2_range[0] <= t <= q2_range[1]]
+        pull_axis.set_xticks(ticks, labels=[f"{t:g}" for t in ticks])
+        ax.set_ylim(0, 1.5)
+        ratio.set_ylim(.8, 2.0)
+        table = pd.concat(rows, ignore_index=True)
+        pull_axis.set_ylim(-1.5, max(5.0, np.ceil(table.pull.max() + .5)))
+        pull_axis.yaxis.set_major_locator(MaxNLocator(5, integer=True))
+        for axis in (ax, ratio, pull_axis):
+            axis.tick_params(direction="in", top=True, right=True, which="both")
+            axis.yaxis.set_minor_locator(AutoMinorLocator())
+        # The entries do not fit inside the F_A panel without covering the
+        # curves, so the legend sits above it.
+        ax.legend(handles, labels, handler_map={tuple: HandlerTuple(ndivide=1)},
+                  frameon=False, fontsize=fonts["legend"], loc="lower left",
+                  bbox_to_anchor=(0, 1.02, 1, 0), mode="expand",
+                  borderaxespad=0, handlelength=2.4)
+        fig.align_ylabels()
     return fig, table
 
 
