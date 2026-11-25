@@ -1,6 +1,6 @@
 {
  "_meta": {
-  "generated": "2026-10-18",
+  "generated": "2026-11-18",
   "notebook": "python/notebooks/19_modeling_knob_screen.ipynb",
   "variant": "count50",
   "base_fits": [
@@ -16,7 +16,14 @@
     1.0
    ],
    "plotname": "XSecShape_CCMEC",
-   "max_shift": 0.3803
+   "max_shift": 0.3198
+  },
+  "DecayAngMEC_UBGenie": {
+   "sigmas": [
+    1.0
+   ],
+   "plotname": "DecayAngMEC",
+   "max_shift": 0.2842
   },
   "FrCEx_N_UBGenie": {
    "sigmas": [
@@ -24,7 +31,7 @@
     3.0
    ],
    "plotname": "FrCEx_N",
-   "max_shift": 0.3447
+   "max_shift": 0.2324
   },
   "NormCCMEC_UBGenie": {
    "sigmas": [
@@ -32,22 +39,7 @@
     3.0
    ],
    "plotname": "NormCCMEC",
-   "max_shift": 0.2253
-  },
-  "DecayAngMEC_UBGenie": {
-   "sigmas": [
-    1.0
-   ],
-   "plotname": "DecayAngMEC",
-   "max_shift": 0.2056
-  },
-  "FracDelta_CCMEC_UBGenie": {
-   "sigmas": [
-    1.0,
-    3.0
-   ],
-   "plotname": "FracDelta_CCMEC",
-   "max_shift": 0.138
+   "max_shift": 0.2202
   },
   "MFP_N_UBGenie": {
    "sigmas": [
@@ -55,23 +47,7 @@
     3.0
    ],
    "plotname": "MFP_N",
-   "max_shift": 0.1248
-  },
-  "FracPN_CCMEC_UBGenie": {
-   "sigmas": [
-    1.0,
-    3.0
-   ],
-   "plotname": "FracPN_CCMEC",
-   "max_shift": 0.1157
-  },
-  "FrAbs_N_UBGenie": {
-   "sigmas": [
-    1.0,
-    3.0
-   ],
-   "plotname": "FrAbs_N",
-   "max_shift": 0.1149
+   "max_shift": 0.1225
   },
   "RPA_CCQE_UBGenie": {
    "sigmas": [
@@ -79,7 +55,31 @@
     3.0
    ],
    "plotname": "RPA_CCQE",
-   "max_shift": 0.1073
+   "max_shift": 0.1225
+  },
+  "FracDelta_CCMEC_UBGenie": {
+   "sigmas": [
+    1.0,
+    3.0
+   ],
+   "plotname": "FracDelta_CCMEC",
+   "max_shift": 0.0867
+  },
+  "FrAbs_N_UBGenie": {
+   "sigmas": [
+    1.0,
+    3.0
+   ],
+   "plotname": "FrAbs_N",
+   "max_shift": 0.0822
+  },
+  "FracPN_CCMEC_UBGenie": {
+   "sigmas": [
+    1.0,
+    3.0
+   ],
+   "plotname": "FracPN_CCMEC",
+   "max_shift": 0.0792
   },
   "FrAbs_pi_UBGenie": {
    "sigmas": [
@@ -87,31 +87,7 @@
     3.0
    ],
    "plotname": "FrAbs_pi",
-   "max_shift": 0.099
-  },
-  "FrInel_N_UBGenie": {
-   "sigmas": [
-    1.0,
-    3.0
-   ],
-   "plotname": "FrInel_N",
-   "max_shift": 0.0945
-  },
-  "MaCCRES_UBGenie": {
-   "sigmas": [
-    1.0,
-    3.0
-   ],
-   "plotname": "MaCCRES",
-   "max_shift": 0.066
-  },
-  "FrCEx_pi_UBGenie": {
-   "sigmas": [
-    1.0,
-    3.0
-   ],
-   "plotname": "FrCEx_pi",
-   "max_shift": 0.0522
+   "max_shift": 0.0787
   },
   "xsr_scc_Fv3_SCC": {
    "sigmas": [
@@ -119,22 +95,38 @@
     3.0
    ],
    "plotname": "xsr_scc_Fv3_SCC",
-   "max_shift": 0.0513
+   "max_shift": 0.0552
   },
-  "FrInel_pi_UBGenie": {
+  "FrInel_N_UBGenie": {
    "sigmas": [
     1.0,
     3.0
    ],
-   "plotname": "FrInel_pi",
-   "max_shift": 0.0466
+   "plotname": "FrInel_N",
+   "max_shift": 0.0536
+  },
+  "MaCCRES_UBGenie": {
+   "sigmas": [
+    1.0,
+    3.0
+   ],
+   "plotname": "MaCCRES",
+   "max_shift": 0.0504
+  },
+  "FrCEx_pi_UBGenie": {
+   "sigmas": [
+    1.0,
+    3.0
+   ],
+   "plotname": "FrCEx_pi",
+   "max_shift": 0.049
   },
   "VecFFCCQEshape_UBGenie": {
    "sigmas": [
     1.0
    ],
    "plotname": "VecFFCCQEshape",
-   "max_shift": 0.0462
+   "max_shift": 0.0463
   },
   "MvCCRES_UBGenie": {
    "sigmas": [
@@ -142,22 +134,15 @@
     3.0
    ],
    "plotname": "MvCCRES",
-   "max_shift": 0.0435
+   "max_shift": 0.0406
   },
-  "Theta_Delta2Npi_UBGenie": {
-   "sigmas": [
-    1.0
-   ],
-   "plotname": "Theta_Delta2Npi",
-   "max_shift": 0.0315
-  },
-  "AGKYpT1pi_UBGenie": {
+  "FrInel_pi_UBGenie": {
    "sigmas": [
     1.0,
     3.0
    ],
-   "plotname": "AGKYpT1pi",
-   "max_shift": 0.031
+   "plotname": "FrInel_pi",
+   "max_shift": 0.0282
   },
   "MFP_pi_UBGenie": {
    "sigmas": [
@@ -165,23 +150,7 @@
     3.0
    ],
    "plotname": "MFP_pi",
-   "max_shift": 0.0309
-  },
-  "MaNCRES_UBGenie": {
-   "sigmas": [
-    1.0,
-    3.0
-   ],
-   "plotname": "MaNCRES",
-   "max_shift": 0.0235
-  },
-  "NonRESBGvnCC1pi_UBGenie": {
-   "sigmas": [
-    1.0,
-    3.0
-   ],
-   "plotname": "NonRESBGvnCC1pi",
-   "max_shift": 0.0216
+   "max_shift": 0.0263
   },
   "CoulombCCQE_UBGenie": {
    "sigmas": [
@@ -189,7 +158,46 @@
     3.0
    ],
    "plotname": "CoulombCCQE",
-   "max_shift": 0.0202
+   "max_shift": 0.0196
+  },
+  "Theta_Delta2Npi_UBGenie": {
+   "sigmas": [
+    1.0
+   ],
+   "plotname": "Theta_Delta2Npi",
+   "max_shift": 0.0186
+  },
+  "NonRESBGvnCC1pi_UBGenie": {
+   "sigmas": [
+    1.0,
+    3.0
+   ],
+   "plotname": "NonRESBGvnCC1pi",
+   "max_shift": 0.0177
+  },
+  "AGKYpT1pi_UBGenie": {
+   "sigmas": [
+    1.0,
+    3.0
+   ],
+   "plotname": "AGKYpT1pi",
+   "max_shift": 0.0156
+  },
+  "MaNCRES_UBGenie": {
+   "sigmas": [
+    1.0,
+    3.0
+   ],
+   "plotname": "MaNCRES",
+   "max_shift": 0.0113
+  },
+  "MaNCEL_UBGenie": {
+   "sigmas": [
+    1.0,
+    3.0
+   ],
+   "plotname": "MaNCEL",
+   "max_shift": 0.0108
   },
   "RDecBR1eta_UBGenie": {
    "sigmas": [
@@ -197,15 +205,7 @@
     3.0
    ],
    "plotname": "RDecBR1eta",
-   "max_shift": 0.0194
-  },
-  "AGKYxF1pi_UBGenie": {
-   "sigmas": [
-    1.0,
-    3.0
-   ],
-   "plotname": "AGKYxF1pi",
-   "max_shift": 0.0155
+   "max_shift": 0.0108
   },
   "NonRESBGvnNC1pi_UBGenie": {
    "sigmas": [
@@ -213,15 +213,7 @@
     3.0
    ],
    "plotname": "NonRESBGvnNC1pi",
-   "max_shift": 0.0126
-  },
-  "MvNCRES_UBGenie": {
-   "sigmas": [
-    1.0,
-    3.0
-   ],
-   "plotname": "MvNCRES",
-   "max_shift": 0.0108
+   "max_shift": 0.0106
   }
  }
 }

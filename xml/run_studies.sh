@@ -2,7 +2,8 @@
 set -euo pipefail
 
 # Rerun every study that depends on the PROfit input files: the binning study
-# (nuwro and asimov fake data, plus nuwro with the CNP chi2), the p_n-range
+# (nuwro and asimov fake data; CNP with the iterated frozen
+# covariance, the runners' default since 2026-11-24), the p_n-range
 # (low-p_n) study, the one-dimensional (Q^2-only) study and the injection
 # study. Use it after the inputs are regenerated (new ROOT file from
 # uboone_ngem/src/save_PROfit_rootfiles_zexp.py) or after a PROfit fix.
@@ -25,7 +26,7 @@ set -euo pipefail
 # list or binnings change.
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-output_root="${OUTPUT_ROOT:-/nevis/hopper/data/epelaez/axial_mass}"
+output_root="${OUTPUT_ROOT:-/nevis/hopper/data/epelaez/axial_mass_cnpmu_iterfrozen}"
 log_dir="${output_root}/logs"
 dry_run="${DRY_RUN:-0}"
 
@@ -41,7 +42,6 @@ Steps, in order:
   1. delete stale PROfit *.bin caches below the study results (older than the inputs or the XMLs)
   2. binning:    xml/binning_study/run_all.sh --family nuwro
                  xml/binning_study/run_all.sh --family asimov
-                 xml/binning_study/run_all.sh --family nuwro --chi2 CNP
   3. lowpn:      xml/lowpn_study/run_all.sh --family nuwro
                  xml/lowpn_study/run_all.sh --family asimov
   4. oned:       xml/oned_study/run_all.sh --family nuwro
@@ -146,7 +146,6 @@ fi
 if selected binning; then
     step binning_nuwro "${script_dir}/binning_study/run_all.sh" --family nuwro
     step binning_asimov "${script_dir}/binning_study/run_all.sh" --family asimov
-    step binning_nuwro_cnp "${script_dir}/binning_study/run_all.sh" --family nuwro --chi2 CNP
 fi
 if selected lowpn; then
     step lowpn_nuwro "${script_dir}/lowpn_study/run_all.sh" --family nuwro

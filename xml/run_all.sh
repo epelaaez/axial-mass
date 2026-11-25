@@ -2,7 +2,7 @@
 set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-output_root="${OUTPUT_ROOT:-/nevis/hopper/data/epelaez/axial_mass}"
+output_root="${OUTPUT_ROOT:-/nevis/hopper/data/epelaez/axial_mass_cnpmu_iterfrozen}"
 profit_bin="${PROFIT_BIN:-/nevis/riverside/share/epelaez/PROfit/build/bin/PROfit}"
 nthreads="${NTHREADS:-8}"
 stages="${STAGES:-plot profile}"
@@ -12,6 +12,18 @@ plot_with_covar="${PLOT_WITH_COVAR:-1}"
 fit_name="${FIT:-}"
 mcmc_iterations="${MCMC_ITERATIONS:-}"
 mcmc_burnin="${MCMC_BURNIN:-}"
+# CHI2: PROfit statistic (CNP default since 2026-11-24; neyman, pearson), passed to every stage.
+# COV=iterfrozen: before the profile stage, iterate the frozen-covariance reference with
+# xml/iterate_frozen.sh and run the profile stage with --frozen-cov at the converged reference.
+# COV=dynamic: covariance rebuilt at every tested point. Neither changes the output directory:
+# the default OUTPUT_ROOT is the CNP + iterated-frozen tree, so give another OUTPUT_ROOT for
+# anything else (the Neyman / dynamic results are in /nevis/hopper/data/epelaez/axial_mass).
+chi2="${CHI2:-CNP}"
+cov_mode="${COV:-iterfrozen}"
+if [[ "${cov_mode}" != "dynamic" && "${cov_mode}" != "iterfrozen" ]]; then
+    echo "Unknown COV=${cov_mode} (dynamic, iterfrozen)" >&2
+    exit 2
+fi
 
 run_nuwro="${RUN_NUWRO:-1}"
 run_asimov="${RUN_ASIMOV:-1}"
@@ -38,6 +50,11 @@ options.
 
 MCMC_ITERATIONS and MCMC_BURNIN are passed to PROfit's profile stage as
 MCMC-Iterations and MCMC-Burnin fit options. If unset, PROfit uses its defaults.
+
+Defaults: CHI2=CNP and COV=iterfrozen (profile stage with the covariance frozen at
+the iterated best fit, xml/iterate_frozen.sh; TOL and MAX_ITER apply), written to
+the CNP + iterated-frozen OUTPUT_ROOT. CHI2=neyman|pearson and COV=dynamic select
+the other treatments; they keep the same layout, so give them their own OUTPUT_ROOT.
 EOF
 }
 
@@ -190,6 +207,9 @@ for family in "${families[@]}"; do
             echo "        ${stage}"
             global_stage_args=()
             subcommand_args=()
+            if [[ "${chi2,,}" != "neyman" ]]; then
+                global_stage_args+=(--chi2 "${chi2}")
+            fi
             if [[ "${stage}" == "plot" && "${plot_with_splines}" == "1" ]]; then
                 subcommand_args+=(--with-splines)
             fi
@@ -200,12 +220,22 @@ for family in "${families[@]}"; do
                 subcommand_args+=(--with-covar)
             fi
             if [[ "${stage}" == "profile" ]]; then
-                if [[ -n "${mcmc_iterations}" ]]; then
-                    global_stage_args+=(--fit-options MCMC-Iterations "${mcmc_iterations}")
-                fi
-                if [[ -n "${mcmc_burnin}" ]]; then
-                    global_stage_args+=(--fit-options MCMC-Burnin "${mcmc_burnin}")
-                fi
+                # --mcmc-correlations: PROfit develop >= 9e9d61c writes the _mcmc_chain TTree (read by every
+                # post-fit notebook) and the post-fit correlation matrix only with this flag.
+                subcommand_args+=(--mcmc-correlations)
+                # One --fit-options flag: the search fix of xml/iterate_frozen.sh plus the chain settings.
+                fit_options=(latin_phys_only 0)
+                [[ -n "${mcmc_iterations}" ]] && fit_options+=(MCMC-Iterations "${mcmc_iterations}")
+                [[ -n "${mcmc_burnin}" ]] && fit_options+=(MCMC-Burnin "${mcmc_burnin}")
+                global_stage_args+=(--seed "${PROFIT_SEED:-1}" --fit-options "${fit_options[@]}")
+            fi
+
+            if [[ "${stage}" == "profile" && "${cov_mode}" == "iterfrozen" ]]; then
+                iteration_args=()
+                [[ "${chi2,,}" != "neyman" ]] && iteration_args=(--chi2 "${chi2}")
+                "${script_dir}/iterate_frozen.sh" "${fit_output}" "${fit}" "" \
+                    "${profit_bin}" --xml "${xml}" --tag "${fit}" --nthread "${nthreads}" "${iteration_args[@]}"
+                global_stage_args+=(--frozen-cov --cov-reference-file "${fit_output}/${fit}_cov_reference.txt")
             fi
 
             if [[ "${dry_run}" == "1" ]]; then
@@ -236,6 +266,9 @@ for family in "${families[@]}"; do
                     "${stage}" \
                     "${subcommand_args[@]}"
             )
+            if [[ "${stage}" == "profile" && "${cov_mode}" == "iterfrozen" ]]; then
+                "${script_dir}/iterate_frozen.sh" --check "${fit_output}" "${fit}" "" v1
+            fi
         done
     done
 done

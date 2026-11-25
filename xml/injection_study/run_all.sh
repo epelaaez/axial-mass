@@ -7,7 +7,7 @@ set -euo pipefail
 # rather than editing them here.
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-output_root="${OUTPUT_ROOT:-/nevis/hopper/data/epelaez/axial_mass}"
+output_root="${OUTPUT_ROOT:-/nevis/hopper/data/epelaez/axial_mass_cnpmu_iterfrozen}"
 study_output="${output_root}/injection_study_fit_results"
 profit_bin="${PROFIT_BIN:-/nevis/riverside/share/epelaez/PROfit/build/bin/PROfit}"
 nthreads="${NTHREADS:-8}"
@@ -133,17 +133,41 @@ if ((${#missing_inputs[@]})); then
     [[ "${dry_run}" == "1" ]] || exit 1
 fi
 
+# CHI2: PROfit statistic (CNP default; neyman, pearson). COV=iterfrozen (default): every profile stage runs
+# with --frozen-cov at the reference iterated by xml/iterate_frozen.sh for that fit (baseline and
+# each injection separately, outputs prefixed <output>_). Neither changes the output directory.
+chi2="${CHI2:-CNP}"
+cov_mode="${COV:-iterfrozen}"
+if [[ "${cov_mode}" != "dynamic" && "${cov_mode}" != "iterfrozen" ]]; then
+    echo "Unknown COV=${cov_mode} (dynamic, iterfrozen)" >&2
+    exit 2
+fi
+metric_args=()
+[[ "${chi2,,}" != "neyman" ]] && metric_args=(--chi2 "${chi2}")
+iterate_script="${script_dir}/../iterate_frozen.sh"
+
 run_profit() {
     # run_profit <dir> <xml> <tag> <output> <log> <stage> [extra global args...]
     local dir="$1" xml="$2" tag="$3" output="$4" log="$5" stage="$6"
     shift 6
-    local chain_args=()
+    local chain_args=() sub_args=() iterated=0
     if [[ "${stage}" == "profile" ]]; then
-        [[ -n "${mcmc_iterations}" ]] && chain_args+=(--fit-options MCMC-Iterations "${mcmc_iterations}")
-        [[ -n "${mcmc_burnin}" ]] && chain_args+=(--fit-options MCMC-Burnin "${mcmc_burnin}")
+        # One --fit-options flag: the search fix of xml/iterate_frozen.sh plus the chain settings.
+        local fit_options=(latin_phys_only 0)
+        [[ -n "${mcmc_iterations}" ]] && fit_options+=(MCMC-Iterations "${mcmc_iterations}")
+        [[ -n "${mcmc_burnin}" ]] && fit_options+=(MCMC-Burnin "${mcmc_burnin}")
+        chain_args+=(--seed "${PROFIT_SEED:-1}" --fit-options "${fit_options[@]}")
+        # PROfit develop >= 9e9d61c writes the _mcmc_chain TTree only with this flag.
+        sub_args+=(--mcmc-correlations)
+        if [[ "${cov_mode}" == "iterfrozen" ]]; then
+            iterated=1
+            "${iterate_script}" "${dir}" "${tag}" "${output}_" \
+                "${profit_bin}" --xml "${xml}" --tag "${tag}" --nthread "${nthreads}" "${metric_args[@]}" "$@" || return 1
+            chain_args+=(--frozen-cov --cov-reference-file "${dir}/${tag}_${output}_cov_reference.txt")
+        fi
     fi
     local cmd=("${profit_bin}" --xml "${xml}" --tag "${tag}" --output "${output}"
-               --nthread "${nthreads}" --log "${log}" "$@" "${chain_args[@]}" "${stage}")
+               --nthread "${nthreads}" --log "${log}" "${metric_args[@]}" "$@" "${chain_args[@]}" "${stage}" "${sub_args[@]}")
     if [[ "${dry_run}" == "1" ]]; then
         printf '(cd %q &&' "${dir}"
         printf ' %q' "${cmd[@]}"
@@ -151,7 +175,10 @@ run_profit() {
         return 0
     fi
     # PROfit logs to --log; ROOT chatter and any crash output go to <log>.out
-    (cd "${dir}" && "${cmd[@]}" > "${log%.log}.out" 2>&1)
+    (cd "${dir}" && "${cmd[@]}" > "${log%.log}.out" 2>&1) || return 1
+    if [[ "${iterated}" == "1" ]]; then
+        "${iterate_script}" --check "${dir}" "${tag}" "${output}_" "${output}"
+    fi
 }
 
 run_group() {

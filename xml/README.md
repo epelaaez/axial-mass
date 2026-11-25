@@ -46,6 +46,39 @@ PROFIT_BIN=/path/to/PROfit ./run_all.sh
 
 Use `./run_all.sh --help` for a concise command reference.
 
+## Statistic and covariance treatment
+
+Every runner defaults to `CHI2=CNP COV=iterfrozen` and writes below
+`/nevis/hopper/data/epelaez/axial_mass_cnpmu_iterfrozen`:
+
+* `CHI2=CNP`: combined Neyman-Pearson statistical variance (needs PROfit
+  develop >= 88c996a, where its Pearson part uses the full prediction).
+* `COV=iterfrozen`: the covariance is held fixed during each minimization and
+  iterated. `iterate_frozen.sh` runs `global` fits with `--frozen-cov`, first
+  with the covariance at the CV prediction and then at the previous best fit
+  (`--cov-reference-file`), until no parameter moves by more than `TOL`
+  (0.01, in units of the spline dial = prior sigma) between two iterations
+  (at most `MAX_ITER`, 30). It writes `<fit>_cov_reference.txt` and
+  `<fit>_trajectory.txt`; the `profile` stage then runs with the covariance
+  frozen at that reference. Every fit passes `--seed` (`PROFIT_SEED`, 1) and
+  `--fit-options latin_phys_only 0`, so the multistart covers the splines and
+  successive iterations differ only through the reference.
+
+`CHI2=neyman|pearson` and `COV=dynamic` (covariance rebuilt at every tested
+point) select the earlier treatments; give them their own `OUTPUT_ROOT`. The
+Neyman / dynamic results used until 2026-11-24 are in
+`/nevis/hopper/data/epelaez/axial_mass`.
+
+`./run_cnp_iterfrozen.sh` runs the whole analysis in order (production,
+injection, nuisance ladder, binning, low-p_n, one-dimensional, toys) with
+500k-step chains; `--only STEP`, `--from STEP`, `DRY_RUN=1`. Finished fits are
+skipped, so clear everything but the `*.bin` caches before a full rerun.
+
+`python/notebooks/27_iterated_frozen_covariance.ipynb` is the method comparison
+that led to this choice (frozen at the CV vs iterated, Neyman vs Pearson vs
+CNP); it reads the Neyman / dynamic tree. Its runner and the other one-off
+check scripts are in `archive/` at the top of the repository.
+
 The validation studies below (binning, p_n range, one-dimensional, injection)
 have their own runners; `./run_studies.sh` runs all of them in sequence after
 deleting the PROfit `*.bin` caches that are older than the inputs or the study
@@ -69,8 +102,7 @@ python/scripts/make_binning_study_xmls.py --family asimov --fit minerva_k6
 
 Rerun the generator whenever the production XMLs change. The variants are
 the count-based grids in `binning_study/count_variants.json`, merged into
-`VARIANTS` inside the generator, plus `legacy`, the hand-drawn 8 x 8 grid that
-was the production binning until 2026-10-03. Production now uses the `count50`
+`VARIANTS` inside the generator. Production uses the `count50`
 grid (9 x 8 = 72 bins), the outcome of this study: the finest grid whose DetVar
 covariance stays physical (`count35` and finer carry bins with more than 100 %
 detector uncertainty) while keeping at least 50 raw MC events per bin and every
@@ -97,9 +129,10 @@ FAMILIES=nuwro FIT="minerva_k6 lqcd_k6" CHI2=CNP binning_study/run_all.sh
 ```
 
 Results go to `OUTPUT_ROOT/binning_study_fit_results/<family>/<variant>/<fit>/`.
-`--chi2`/`CHI2` selects PROfit's statistic (neyman, pearson, CNP, poisson); a
-non-default statistic writes to `<family>_<chi2>/` so it never overwrites the
-Neyman results. Unlike `run_all.sh`, the study runner does not pass
+`--chi2`/`CHI2` selects PROfit's statistic (CNP, neyman, pearson) and `COV`
+the covariance treatment; anything other than the default CNP + iterfrozen
+writes to `<family>_<chi2>/`, `<family>_dynamic/` or `<family>_frozencov/`, so
+it never overwrites the default results. Unlike `run_all.sh`, the study runner does not pass
 `--with-covar` to the `plot` stage by default: the covariance PDFs take several
 minutes at a few hundred bins and are not needed to compare fits. Set
 `PLOT_WITH_COVAR=1` to write them, or `STAGES=profile` to skip plotting
@@ -229,6 +262,31 @@ Each XML is processed once in
 `OUTPUT_ROOT/injection_study_fit_results/<variant>/<fit>/<knob>/` and its injections reuse the binaries there, one `global` fit each
 (`STAGES`), written with `--output inj<sigma>`. The baselines run `profile`
 (`BASELINE_STAGES`) for the F_A uncertainties the shifts are compared with.
+
+# Nuisance-ladder study
+
+`nuisance_ladder_study/<family>/<variant>/` tests the 0.2 sigma[F_A] cut of
+the injection study by floating the next knobs of its ranking cumulatively:
+`n5` is the production set, `n6` ... `n10` add `VecFFCCQEshape`,
+`FracPN_CCMEC`, `xsr_scc_Fv3_SCC`, `FrAbs_N` and `NormCCMEC`. The XMLs come
+from `python/scripts/make_nuisance_ladder_study_xmls.py` (fits `ma` and
+`minerva_k6_nuisance`; families asimov, nuwro, opendata) and run with
+`nuisance_ladder_study/run_all.sh`, the binning-study runner again. Results go
+to `OUTPUT_ROOT/nuisance_ladder_study_fit_results/<family>/<variant>/<fit>/`;
+`python/notebooks/25_nuisance_ladder_study.ipynb` compares the rungs and
+`26_hidden_covariance_pulls.ipynb` shows the pulls of the knobs left in the
+covariance.
+
+# Pseudo-experiments
+
+`pseudo_experiments/run_toys.sh` throws and fits toys from the Asimov XMLs
+(ensembles A, B10/B11/B12, C00/C12, D: which parameters are thrown from their
+priors and which are held at an injected truth is listed at the top of the
+script), one directory per fit below `OUTPUT_ROOT/pseudo_experiments/`.
+`--method iterfrozen` is the production treatment; a toy that does not reach
+`TOL` within `MAX_ITER` refits has no `.converged` marker and is reported as
+not converged. `python/scripts/collect_pseudo_experiments.py` gathers the toys
+into `tables/pseudo_experiments/toys.csv`.
 
 # PROfit weight conventions
 
